@@ -262,6 +262,16 @@ def simulate_botnet(
     spread across several node-by-node entries. This makes infection_history
     track genuine discrete time steps (comparable across graphs/methods), and
     gives Milestone 3's RL agent a natural point to prune edges between rounds.
+
+    Both frontier AND each node's neighbors are iterated in SORTED order, so
+    the sequence of rng.random() draws -- and therefore the outcome for a
+    given seed -- depends only on (graph edges, edge_probabilities, seed,
+    initial_compromised), never on incidental object-construction history.
+    Without the neighbor sort, nx.Graph.copy() can silently reorder a node's
+    adjacency dict (same edge set, different iteration order), which pairs
+    the same rng draws with different neighbors and changes the outcome for
+    an identical seed -- found while building Milestone 3's environment; see
+    NOTES.md for the affected-scope writeup.
     """
     rng = random.Random(seed)
     infected_nodes = set(initial_compromised)
@@ -277,7 +287,7 @@ def simulate_botnet(
         # Sort for a deterministic RNG draw order, so a fixed seed always
         # reproduces the same rollout regardless of Python's set iteration order.
         for current in sorted(frontier):
-            for neighbor in graph.neighbors(current):
+            for neighbor in sorted(graph.neighbors(current)):
                 # Compare against infected_nodes (start-of-round state), not
                 # next_frontier, so every incoming edge still gets its own
                 # independent Bernoulli trial even if another frontier node

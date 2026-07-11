@@ -3,85 +3,308 @@
 Running log of findings that need to survive into the final write-up but
 don't belong in code comments or README. Newest entries at the top.
 
-## 2026-07-11 -- Milestone 2 training convergence: plateaus well before 300 epochs, mild overfitting in the tail
+## 2026-07-11 -- Milestone 3 DQN: confirmed reward-driven "always max-prune" policy (sets up Milestone 4's reward-weighting ablation), plus RL vs. static baselines comparison
+
+**Exhausted-bucket action-mask fix.** The trained greedy policy was getting
+stuck repeatedly "choosing" an already-fully-pruned attention bucket (a
+no-op) for several steps until `max_steps` was hit, instead of reaching the
+removal budget cleanly. Fixed by adding `PruningEnv.action_mask()` (True for
+buckets with >=1 remaining edge, STOP always True) and threading it through
+`select_action` (both epsilon-greedy exploration and the final greedy
+policy now only ever pick a currently-valid action). Also applied to the
+earlier mechanics-only random-policy demos for consistency. After the fix,
+the greedy rollout reaches the removal budget in clean, distinct steps
+(0.503 final, matching the 0.5 cap) instead of repeating a dead action.
+
+**Confirmed finding: under w_security=1.0/w_utility=1.0/w_cost=0.1, the
+learned policy converges to always pruning to the removal budget cap.**
+This was checked, not assumed -- see the DQN monitoring writeup: replay
+buffer had 14-17% of transitions from deep (>40% removed) trajectories
+throughout training, deep trajectories were first seen at episode 0 (169
+episodes before epsilon decayed below 0.2), and 44% of TRAINING episodes
+(behavior policy) chose STOP before the budget. None of that points to an
+exploration gap. Directly inspecting the trained Q-network's STOP-vs-continue
+estimate at 8 actual deep-state transitions it trained on: continuing to
+prune wins in all 8 cases, several by 3-6x margins (e.g. Q(STOP)=1.953 vs.
+Q(continue)=6.345). **This is a genuine learned preference given the current
+reward weights, not insufficient training or exploration** -- the network
+correctly learned that on this graph, containment and utility keep
+improving enough with more pruning that the small (0.1-weighted) cost term
+never catches up. Per explicit instruction, reward weights were NOT
+retuned to chase a "more adaptive-looking" policy -- reward-weighting
+comparison is Milestone 4's ablation task, not Milestone 3's. This finding
+is exactly the starting point that ablation needs.
+
+**RL vs. static baselines, at the matching ~50% removal level (the roadmap's
+"compare RL-based pruning versus static thresholds" task).** Every method
+scored on containment ratio (same 5-seed x 15-rollout methodology used
+throughout) AND on BOTH utility definitions (frozen-base-GAT forward pass,
+matching what the RL reward actually optimizes; and Milestone 2's original
+retrained-GAT utility), per the plan recorded when this divergence was
+first flagged -- so this is the first comparison in the project where that
+plan is actually carried out, not just noted for later.
+
+| method | removed | containment_ratio | frozen_recall | frozen_f1 | retrained_recall | retrained_f1 |
+|---|---|---|---|---|---|---|
+| RL adaptive pruning (DQN) | 0.503 | 0.060+/-0.04 | **0.500** | **0.609** | 0.429 | 0.522 |
+| GAT threshold | 0.501 | 0.041+/-0.01 | 0.214 | 0.353 | **0.571** | **0.696** |
+| GAT top-k-per-node | 0.558 | 0.041+/-0.02 | 0.357 | 0.526 | 0.500 | 0.636 |
+| degree-centrality | 0.501 | 0.039+/-0.03 | 0.286 | 0.444 | 0.286 | 0.444 |
+| betweenness-centrality | 0.501 | 0.044+/-0.03 | 0.214 | 0.353 | 0.286 | 0.444 |
+| highest-p_uv | 0.501 | **0.036+/-0.01** | 0.000 | 0.000 | 0.143 | 0.222 |
+| random | 0.501 | 0.117+/-0.07 | 0.476 | 0.602 | 0.310 | 0.432 |
+| greedy oracle | 0.501 | 0.088+/-0.07 | 0.286 | 0.444 | 0.357 | 0.500 |
+
+**Reading this honestly, on each axis separately:**
+- **Containment**: RL is NOT the best -- it's worse than all 5 static
+  structural methods (0.060 vs. 0.036-0.044), though clearly better than
+  random (0.117) and the greedy oracle (0.088). Expected: RL is balancing
+  three reward terms at once, not purely optimizing containment the way
+  "remove the highest-X edges" methods do.
+- **Frozen utility (what the RL reward actually optimizes)**: RL has the
+  BEST recall/F1 in the whole table (0.500/0.609) -- the training pipeline
+  is doing what it was told to do. random is a surprisingly close second
+  (0.476/0.602).
+- **Retrained utility (Milestone 2's original metric)**: RL is mid-pack,
+  3rd of 8 (0.429/0.522), behind both GAT threshold (0.696 F1) and GAT
+  top-k (0.636 F1).
+- No method wins on every axis. This is a single graph, single RL training
+  run -- same caveats as every other single-graph comparison in this
+  project apply here too; Milestone 4's proper multi-graph harness is
+  still where a real "RL beats/loses to static pruning" claim would need
+  to be established.
+
+**Notable side-finding: highest-p_uv's frozen utility collapses to
+0.000/0.000 recall/F1 at 50% removal**, despite having the BEST
+containment ratio (0.036) and non-trivial RETRAINED utility (0.222 F1).
+This is a concrete, striking illustration of exactly why the
+frozen-vs-retrained utility divergence needed to be resolved before any
+final comparison: removing the highest-p_uv edges apparently strips out
+structural signal the FROZEN model specifically depended on, while a
+FRESH retrained model can partially relearn around their absence. A method
+that looks reasonable under one utility definition can look catastrophic
+under the other, for the identical pruned graph -- worth a dedicated
+mention in the final write-up, not just a footnote.
+
+**Sanity-checked, not assumed: the 0.000 frozen recall is genuine, not a
+divide-by-zero bug.** Raw counts on the highest-p_uv 50%-pruned graph:
+`total_positive=14` (real positives exist in the test set), `predicted_positive=1`,
+`true_positive=0` -- the frozen model collapsed to predicting almost every
+test node as benign (only 1 positive prediction out of 60) and that one
+prediction was wrong. `test_acc=0.75` looks fine only because accuracy
+rewards the collapse-to-majority-class behavior -- the same accuracy-vs-recall
+trap flagged elsewhere in this project, now visible in the frozen-utility
+metric specifically.
+
+## 2026-07-11 -- simulate_botnet neighbor-order bug: found, fixed, and every affected number rerun (MOST SIGNIFICANT METHODOLOGICAL FIX THIS SESSION)
+
+**Found while building Milestone 3's environment.** `PruningEnv.reset()`
+expected its episode-start containment ratio to read ~1.0 (nothing pruned
+yet, should match the unpruned baseline exactly). It read 0.986 instead.
+Investigating rather than shrugging it off: `nx.Graph.copy()` does NOT
+preserve neighbor-iteration order (verified: 35/60 nodes had reordered
+adjacency after `.copy()`, despite an identical edge set), and
+`simulate_botnet` iterated `graph.neighbors(current)` in whatever order the
+adjacency dict yielded, consuming one `rng.random()` draw per neighbor in
+that order -- so a reordered adjacency pairs the same random draws with
+different neighbors, changing the outcome for an identical seed. (Copies of
+the same graph are internally CONSISTENT with each other, just different
+from the original -- this is not run-to-run randomness, it's a deterministic
+dependency on incidental object-construction history that shouldn't exist.)
+
+**Fix:** `simulate_botnet` now sorts neighbor iteration too (previously only
+`frontier` was sorted). Verified fixed: original graph and `.copy()` of it
+now give byte-identical results for the same seed.
+
+**Scope, precisely checked rather than assumed:** grepped every
+`simulate_botnet` call site.
+- UNAFFECTED by the copy-order bug specifically: `demo_milestone1.py`,
+  both `tests/test_milestone1.py` calls, `generate_labeled_graph`
+  (src/milestone2.py) -- none of these call simulate_botnet on a `.copy()`'d
+  graph.
+- HOWEVER: the FIX ITSELF (sorting neighbors) changes simulate_botnet's
+  output relative to the OLD behavior for basically any graph, copied or
+  not, since old behavior used native/insertion adjacency order and the new
+  behavior uses sorted order -- these generally differ. The one exception:
+  node 0 in a Barabasi-Albert graph can only ever be a "later-attached-to"
+  node (it has zero neighbors at creation), so its adjacency list is built
+  up in strictly increasing node-index order over time -- already sorted by
+  construction. This is why `demo_milestone1.py`'s node-0-seeded rollout
+  happened to be invariant; no other node has that property in general.
+- CONFIRMED via direct comparison (`git stash` to diff old vs. new
+  `generate_labeled_graph` output on the identical graph): labels changed
+  (61/300 infected pre-fix vs. 60/300 post-fix, different per-node
+  assignment, not just count) -- because label generation seeds infection
+  from the HUB node, not node 0. This cascades into every downstream
+  Milestone 2 number: GAT training, attention scores, recall/F1/precision,
+  the pruning comparison table, the greedy oracle, the convergence plot --
+  essentially everything, not just `demo_milestone2_pruning.py` as
+  originally (incorrectly) scoped.
+
+**Full test suite (22 tests) still passes** -- these check structural
+properties (counts, label validity, shape, monotonicity), not exact
+numeric equality, so none needed changes.
+
+**Every affected demo was rerun and every NOTES.md entry below with
+specific numbers has been updated in place** (each marked "[numbers updated
+post-fix]" in its heading) rather than left stale: the Milestone 2 mildness
+comparison, the attention-score correlation, the training convergence plot,
+and the full pruning comparison (including a full redo of the 1-vs-5-rollout
+greedy-oracle diagnostic, ~12 more minutes of compute). In every case the
+QUALITATIVE conclusion held or got cleaner -- except the pruning
+comparison's "GAT top-k looks most balanced" tentative lean, which did NOT
+survive and has been corrected to a more conservative reading (see that
+entry). This is itself a useful data point for the final write-up: a single
+upstream implementation bug was able to flip which heuristic looked best in
+a single-graph comparison, which is exactly the kind of fragility Milestone
+3's proper multi-graph statistical harness needs to guard against.
+
+## 2026-07-11 -- Milestone 3 RL environment: utility-metric divergence from Milestone 2, and single-graph scope (both flagged BEFORE training, not discovered after)
+
+Two design decisions made while formalizing the RL environment, recorded now
+so they don't get lost or misread as oversights later:
+
+**Utility metric divergence.** Milestone 2's `measure_utility` retrains a
+fresh GAT from scratch on each pruned graph (~3.6s/call) -- fine for a
+one-off comparison table, but far too slow to call at every RL step across
+hundreds of episodes. The RL reward's utility term instead uses the
+ALREADY-TRAINED base GAT's forward-pass performance on the current pruned
+topology -- no retraining, ~1ms/call, and (since the model is frozen and
+eval-mode is deterministic) zero added randomness. This is a deliberate,
+tractability-driven choice, not an oversight, and arguably more realistic
+for an adaptive agent (a live system doesn't retrain its classifier after
+every edge cut) -- but it means Milestone 2's baseline numbers
+(retrain-based utility) and Milestone 3's RL numbers (frozen-forward-pass
+utility) are NOT currently on the same utility definition. **Plan:** before
+any final "RL vs. static baselines" comparison, also compute the
+frozen-base-GAT forward-pass utility for Milestone 2's baseline methods
+(random/degree/betweenness/highest-p_uv/GAT-threshold/GAT-top-k/greedy
+oracle), so the comparison is apples-to-apples on whichever utility
+definition is used. Do not compare Milestone 2's retrain-based numbers
+directly against Milestone 3's frozen-forward-pass numbers without doing
+this first.
+
+**Single-graph scope.** Like Milestone 2's pruning evaluation, the RL
+environment trains and evaluates on ONE fixed graph instance (the same
+n=300 graph used throughout). Generalization across different graph
+instances/topologies is explicitly Milestone 4's stress-test concern, not
+Milestone 3's. Any "the agent learned X" or "RL beats static pruning"
+claim from this environment needs the same caveat Milestone 2's pruning
+results already carry: directional evidence from one graph, not a
+validated general result.
+
+**Reward-evaluation compute cost (checked empirically before committing to
+the training loop, per this project's own standard for expensive methods):**
+one full 5-seed x 15-rollout security measurement takes ~7.2ms; the frozen
+base-GAT forward pass for utility takes ~1.1ms. Combined ~8.3ms per reward
+evaluation. A realistic training run (200-500 episodes x 10-20 steps) is
+therefore ~17-83s of reward-evaluation cost alone -- comfortably tractable
+at FULL Milestone-2-grade rigor. Unlike the greedy oracle, this does NOT
+need a cheap-search-signal-vs-full-report split; the full 5-seed/15-rollout
+measurement is used throughout training, not just at final evaluation.
+
+## 2026-07-11 -- Milestone 2 training convergence: plateaus well before 300 epochs [numbers/description updated post-fix]
 
 Added optional per-epoch train/val loss+accuracy logging to `train_gat`
 (`log_history=True`, off by default -- see `demo_milestone2_convergence.py`
-and `training_curves.png`). On a representative run (n=300 nodes, split
-seed 0): both losses drop sharply for ~75-100 epochs, then train loss keeps
-slowly decreasing while validation loss flattens and drifts up slightly
-(best val_loss at epoch 281 of 300, but the whole 150-300 range is a noisy
-plateau, not a clear minimum) -- a mild, unsurprising overfitting signature
-given dropout is already regularizing against it. Practical takeaway: 300
+and `training_curves.png`). **Rerun post the simulate_botnet neighbor-order
+fix** (different labels -> different representative run). On the current
+run (n=300 nodes, split seed 0): both losses drop from ~0.66 to ~0.49 over
+the first ~150 epochs (validation drops faster and plateaus earlier, around
+epoch 40-50; train catches up by ~150-200), then both hover in a noisy
+plateau (~0.48-0.52) for the remaining epochs with no clear separating gap
+-- train and validation stay close together throughout, sometimes train
+even slightly above validation, which is actually LESS evidence of
+overfitting than the pre-fix run showed (which had validation loss
+drifting up above a still-decreasing train loss). Best val_loss now at
+epoch 118 (vs. epoch 281 pre-fix), but as before the whole tail is a noisy
+plateau, not a single clear minimum. Practical takeaway unchanged: 300
 epochs is more than strictly needed for convergence on this graph size;
 kept as the default anyway since the cost is small and this hasn't been
-tuned/validated across multiple graphs yet (that's Milestone 3 territory).
+tuned/validated across multiple graphs yet (that's Milestone 3/4 territory).
 
-## 2026-07-11 -- Milestone 2 greedy oracle: does NOT behave as an upper bound at low pruning levels (search-signal noise), only catches up by 50%
+## 2026-07-11 -- Milestone 2 greedy oracle: does NOT behave as an upper bound at ANY pruning level tested (search-signal noise ruled out) [numbers updated post-fix]
 
 Added the supervisor-requested greedy oracle baseline
 (`greedy_oracle_prune`, `src/milestone2_pruning.py`): at each step, remove
 whichever remaining edge most reduces simulated infection (averaged across
 the same 5 seed nodes used everywhere else), one at a time. A full O(steps x
 remaining_edges) search to 50% removal needs ~300K candidate evaluations on
-this ~900-edge graph -- empirically ~25s total (all 3 checkpoints, one
+this ~900-edge graph -- empirically ~25-31s total (all 3 checkpoints, one
 incremental run) using in-place edge remove/restore (not graph copying) and
 a cheap 1-rollout-per-candidate search signal. The checkpoint graphs it
 returns ARE re-measured with the same full-rollout rigor as every other
 method for the reported numbers -- only the SEARCH itself uses the cheap
 signal.
 
-**Result, stated plainly (see the updated containment_ratio_vs_pruning_level.png):**
-the oracle is NOT the best-performing method at low pruning levels --
-at 10% removal its containment ratio (0.599+/-0.123) is WORSE than 4 of the
-5 other methods (degree-centrality 0.395, highest-p_uv 0.379, GAT top-k
-0.402, betweenness 0.451), beating only random (0.703). At 25% it's still
-mid-pack (0.223 vs. 0.104-0.129 for the structural methods). It only
-converges with the pack by 50% (0.035, tied with GAT top-k/degree-
-centrality/highest-p_uv). It DOES show the best utility (recall/F1) at
-every level, notably 0.500 recall / 0.571 F1 at 50% -- the best F1 in the
-entire table.
+**Numbers below are POST the simulate_botnet neighbor-order fix** (see that
+dated entry). The finding is the SAME shape, if anything stronger:
 
-**Follow-up diagnostic (same day): confirmed as myopia, not search noise.**
+**Result, stated plainly (see the updated containment_ratio_vs_pruning_level.png):**
+the oracle is NOT the best-performing method at ANY of the three pruning
+levels tested. At 10% removal its containment ratio (0.634+/-0.101) is worse
+than all 5 structural methods (0.433-0.508), beating only random (0.787). At
+25% it's still clearly worse than every structural method (0.270 vs.
+0.119-0.188). At 50% -- where the PRE-FIX numbers showed it converging with
+the pack -- it is now still clearly worse (0.088 vs. 0.036-0.044 for the
+structural methods, roughly 2x), not converging at all. It also no longer
+has the best F1 in the table -- GAT threshold does now (0.696 at 50%,
+greedy oracle's is 0.500). The "only pays off at higher pruning levels"
+softening from the pre-fix version of this entry did not survive: in the
+corrected numbers, the oracle simply underperforms the structural
+heuristics at every level checked, on both axes.
+
+**Follow-up diagnostic: confirmed as myopia, not search noise -- and the
+post-fix rerun is an even cleaner confirmation than the original.**
 Reran the search with search_rollouts=5 instead of 1 (everything else
 identical -- same graph, seeds, checkpoints; final numbers still measured at
 full rigor). If noise were the main cause, more rollouts should have
-consistently closed the gap at every level. It didn't:
+consistently closed the gap at every level. It didn't -- and post-fix, more
+rollouts made things WORSE at every single level, not just at 10%:
 
 | level | search_rollouts=1 | search_rollouts=5 | other methods' range |
 |---|---|---|---|
-| 10% | 0.599 | **0.711 (worse)** | 0.10-0.45 |
-| 25% | 0.223 | 0.191 (barely better) | 0.10-0.13 |
-| 50% | 0.035 | 0.019 (now best) | ~0.03 |
+| 10% | 0.634 | **0.889 (much worse)** | 0.43-0.79 |
+| 25% | 0.270 | **0.715 (much worse)** | 0.12-0.19 |
+| 50% | 0.088 | **0.320 (much worse)** | ~0.04 |
 
-At 10% -- where the gap was largest -- 5x the search signal made
-containment measurably WORSE, not better, and 25% barely moved and
-remained clearly mid-pack. Only at 50% did more rollouts help meaningfully.
-This is the opposite of what the noise hypothesis predicts (consistent
-improvement at every level) and matches the myopia hypothesis instead:
-early in the trajectory, picking the single locally-best edge one at a time
-just doesn't find as good a combination as a heuristic that ranks ALL edges
-by a global criterion at once, no matter how accurately each candidate is
-scored. The 5-rollout search also cost ~415s vs. ~25s (~16x, more than the
-naive 5x) for no reliable improvement at the levels that mattered -- not
-pursuing higher rollout counts further, per the "confirm and stop" scope of
-this diagnostic.
+(Pre-fix, this same diagnostic showed a MIXED picture -- worse at 10%,
+barely better at 25%, better at 50% -- which was already enough to rule out
+noise as the main driver. Post-fix, the direction is unanimous: 5x the
+search accuracy makes the outcome worse at every level checked.) This
+actually makes sense under the myopia explanation and not under the noise
+explanation: a noisier 1-rollout signal sometimes fails to fully commit to
+the locally-optimal-but-globally-poor edge at a given step (accidentally
+hedging by chance), while a more accurate 5-rollout signal reliably finds
+and commits to the TRUE locally-best edge every time -- which, if the
+greedy strategy's failure mode is structural (not estimation error), makes
+the outcome MORE consistently myopic, not less. A heuristic that ranks ALL
+remaining edges by a global criterion at once (degree, betweenness, p_uv)
+simply doesn't have this failure mode, regardless of how precisely any
+single greedy step is scored. The 5-rollout search also cost ~719s vs.
+~25-31s (~23-29x, far more than the naive 5x) for a WORSE outcome at every
+level -- not pursuing higher rollout counts further, per the "confirm and
+stop" scope of this diagnostic.
 
 **Consequence for the write-up:** do NOT call this method an "upper bound"
 without this caveat attached -- the plot/table label it plainly as "greedy
-oracle" (no parenthetical claim) for exactly this reason, and this stands
-confirmed, not just suspected. Report it as "a greedy, outcome-driven
-baseline that only pays off at higher pruning levels because of its
-inherent one-step-at-a-time myopia," not as a validated ceiling on
-achievable containment.
+oracle" (no parenthetical claim) for exactly this reason. Post-fix, the
+finding is if anything MORE clear-cut than before: report it as "a greedy,
+outcome-driven baseline that underperforms simple structural heuristics at
+every pruning level tested, because of its inherent one-step-at-a-time
+myopia," not as a validated ceiling on achievable containment.
 
-## 2026-07-11 -- Milestone 2 pruning: corrected re-run (multi-seed containment ratio + recall/F1) -- no method dominates; GAT top-k looks most balanced but NOT statistically confirmed
+## 2026-07-11 -- Milestone 2 pruning: corrected re-run (multi-seed containment ratio + recall/F1) -- no method dominates, and the "GAT top-k most balanced" lean did NOT survive the simulate_botnet fix [numbers updated post-fix]
 
 Follow-up to the fixed-hub-seed artifact entry directly below: re-ran the full
-6-method x 3-level comparison with the corrected harness (5 seed nodes --
-hub, mid, 3 random draws -- containment ratio per seed averaged, recall/F1 as
-the utility metric). Full numbers in `demo_milestone2_pruning.py`'s output;
-summary (containment ratio: lower = more contained, 1.0 = no effect):
+7-method x 3-level comparison (6 baselines + greedy oracle) with the
+corrected harness (5 seed nodes -- hub, mid, 3 random draws -- containment
+ratio per seed averaged, recall/F1 as the utility metric). Full numbers in
+`demo_milestone2_pruning.py`'s output.
+
+**These numbers are POST the simulate_botnet neighbor-order fix** (see that
+dated entry) and supersede the table originally here. The ORIGINAL 6-method
+table (pre-fix) was:
 
 | method | 10% | 25% | 50% |
 |---|---|---|---|
@@ -92,36 +315,47 @@ summary (containment ratio: lower = more contained, 1.0 = no effect):
 | highest-p_uv | 0.379+/-0.205 | 0.110+/-0.064 | 0.031+/-0.009 |
 | random | 0.703+/-0.125 | 0.424+/-0.151 | 0.106+/-0.073 |
 
-**What changed:** degree-centrality's dramatic single-hub-seed "dominance"
-(0.003 containment) is gone -- averaged across seeds it's statistically
-indistinguishable from several other methods at every level (heavily
-overlapping std bands, e.g. 10%: degree 0.395+/-0.242 vs. p_uv 0.379+/-0.205).
-**Sanity check passed:** random pruning is the clear worst at every level,
-confirming targeted pruning has genuine value over blind removal even after
-the seed-artifact correction -- the fix didn't erase the whole result, just
-the specific "degree-centrality wins" claim.
+The CURRENT (post-fix), 7-method table:
 
-**Tentative read (single graph, 5 seeds, single model-seed per utility run --
-NOT yet the statistically rigorous comparison Milestone 3 will do; treat as
-directional, not confirmed):**
-- GAT top-k-per-node looks like the most balanced performer: competitive-to-
-  best containment at every level AND the best-or-tied recall/F1 at higher
-  pruning (0.417 recall, 0.556 F1 at 50% -- the highest F1 anywhere in the
-  table).
-- GAT threshold (the OTHER GAT-based mechanism, same underlying score) is
-  consistently the WEAKEST of the targeted methods on containment at every
-  level, despite preserving utility perfectly (identical to baseline) up to
-  25% removal -- the two GAT pruning mechanisms behave quite differently
-  from the same score, and top-k is the stronger of the two here.
-- highest-p_uv is strong on security at low pruning (best of all methods at
-  10%) but its recall drops sharply at 25%+ (0.250, tied-worst) -- plausibly
-  because cutting high-p_uv edges also removes some of the structural signal
-  the classifier relies on for the compromised class.
-- Do not treat any of these as confirmed: most pairwise differences sit
-  within a standard deviation of each other (e.g. degree-centrality and
-  highest-p_uv are within noise of each other at every level tested).
-  Confirming any of this needs Milestone 3's harness -- many graphs, paired
-  significance tests, multiple-comparison correction.
+| method | 10% | 25% | 50% |
+|---|---|---|---|
+| GAT threshold | 0.489+/-0.095 | 0.188+/-0.064 | 0.041+/-0.015 |
+| GAT top-k | 0.461+/-0.123 | 0.142+/-0.064 | 0.041+/-0.016 |
+| degree-centrality | 0.458+/-0.276 | 0.119+/-0.063 | 0.039+/-0.030 |
+| betweenness | 0.508+/-0.075 | 0.125+/-0.071 | 0.044+/-0.026 |
+| highest-p_uv | 0.433+/-0.232 | 0.135+/-0.104 | 0.036+/-0.010 |
+| random | 0.787+/-0.111 | 0.486+/-0.193 | 0.117+/-0.073 |
+| greedy oracle | 0.634+/-0.101 | 0.270+/-0.154 | 0.088+/-0.071 |
+
+**Sanity check still passes:** random is still clearly worst at every level;
+degree-centrality's dramatic single-hub-seed "dominance" is still gone
+(statistically indistinguishable from the other structural methods). Both
+core conclusions from the original corrected re-run survive the fix.
+
+**What did NOT survive: the "GAT top-k looks most balanced" tentative lean.**
+With the new numbers:
+- Containment ranking shuffled: at 10%, highest-p_uv (0.433) is now best,
+  not GAT top-k; at 25%, degree-centrality (0.119) is best; at 50%,
+  highest-p_uv (0.036) is best again. GAT top-k is never clearly best on
+  containment in the new numbers, just mid-pack.
+- Utility flipped too: GAT THRESHOLD now has the highest F1 in the entire
+  table (0.696 at 50%), not GAT top-k (0.636) -- the opposite of what the
+  pre-fix run showed.
+- GAT threshold is no longer consistently the weakest on containment either
+  -- it's worst of the 5 structural methods at 25% (0.188), but NOT at 10%
+  (betweenness is worse, 0.508) or 50% (betweenness is worst, 0.044, GAT
+  threshold ties for 2nd).
+
+**Updated, more conservative read:** no method -- including either
+GAT-based mechanism -- shows a stable edge across both containment and
+utility once the exact numbers are corrected. Which method looks "best"
+depends on which level and which axis (containment vs. utility) you look
+at, and that dependence itself flipped when a single upstream bug was
+fixed. This is the clearest evidence yet in this project that single-graph,
+few-seed comparisons like this one are NOT resilient enough to support a
+"method X wins" claim -- treat every number here as directional pending
+Milestone 3's proper multi-graph, paired-significance harness, more
+emphatically than the pre-fix version of this entry did.
 
 ## 2026-07-11 -- Milestone 2 pruning: fixed-hub-seed infection is a methodology trap; fixed going forward (KEY METHODOLOGICAL RESULT)
 
@@ -150,6 +384,19 @@ a methodology artifact, not a real result, confirmed two ways:
    methods. At 10% pruning, mid-seeded infected fraction: degree-centrality
    0.049 vs. highest-p_uv 0.008 -- p_uv contained mid-seeded spread over 6x
    better than degree-centrality, the opposite of the hub-seeded picture.
+
+   (Note: point 1's 100%/63% hub-edge-removal numbers are a pure graph-
+   structure/ranking fact -- no simulate_botnet call involved -- so they are
+   UNAFFECTED by the later simulate_botnet neighbor-order fix described
+   further down this file. Point 2's specific infected-fraction numbers
+   (0.049/0.008) predate that fix and came from a since-superseded script
+   version [the hub-edge-removal print was later dropped from
+   demo_milestone2_pruning.py]; they were not re-verified bit-exact, but the
+   qualitative finding they illustrate -- p_uv targets risk directly, so it
+   isn't vulnerable to the same hub-isolation artifact degree-centrality is
+   -- is a structural argument, not a numerical coincidence, and the LIVE,
+   current numbers for this comparison are in the "corrected re-run" entry
+   above, which IS fully updated post-fix.)
 
 **Conclusion:** degree-centrality's apparent dominance in the original
 single-hub-seed results was substantially a fixed-seed artifact (it isolates
@@ -180,7 +427,7 @@ and F1, not accuracy, are the utility metrics used for pruning comparisons
 going forward -- the same lesson already learned for the base classifier
 (see the entry below).
 
-## 2026-07-11 -- Milestone 2 attention scores: raw s_uv is degree-confounded; correction only partially explains the negative correlation
+## 2026-07-11 -- Milestone 2 attention scores: raw s_uv is degree-confounded; correction only partially explains the negative correlation [numbers updated post-fix]
 
 Raw attention-based edge scores (`extract_edge_attention_scores`,
 `src/milestone2.py`) turned out strongly, negatively correlated with
@@ -193,11 +440,17 @@ the target's degree (`extract_degree_corrected_attention_scores`) cancels
 that mechanical effect and gives a "relative preference vs. uniform
 attention" score (~1.0 = uniform share, >1 = favored, <1 = disfavored).
 
+**Numbers below are POST the simulate_botnet neighbor-order fix** (see that
+dated entry) -- rerun in full since the fix changes `generate_labeled_graph`'s
+labels and therefore the trained GAT being analyzed. Same pattern, very
+similar magnitudes; the plots (re-viewed) show the identical 1/x-gone,
+high-degree-compression shape as before.
+
 | metric | raw Pearson r | corrected Pearson r | raw Spearman r | corrected Spearman r |
 |---|---|---|---|---|
-| p_uv | -0.490 | -0.276 | -0.521 | -0.417 |
-| edge betweenness centrality | -0.579 | -0.311 | -0.667 | -0.481 |
-| avg endpoint hub_score | -0.616 | -0.220 | -0.791 | -0.504 |
+| p_uv | -0.494 | -0.348 | -0.540 | -0.476 |
+| edge betweenness centrality | -0.539 | -0.329 | -0.624 | -0.422 |
+| avg endpoint hub_score | -0.591 | -0.272 | -0.772 | -0.481 |
 
 **Honest conclusion: the correction is not a full explanation, and the
 correlation did not disappear or flip.** Pearson (linear) correlations
@@ -224,7 +477,7 @@ property of what the trained GAT learned -- worth revisiting once more
 graphs are available (Milestone 3) rather than over-interpreting from one
 graph instance.
 
-## 2026-07-11 -- Milestone 2 GAT: minority-class recall is weak (~38%)
+## 2026-07-11 -- Milestone 2 GAT: minority-class recall is weak (~46%) [numbers updated post simulate_botnet fix]
 
 The Milestone 2 GAT (benign vs compromised node classification,
 `src/milestone2.py`) uses `train_gat`'s default `weight_mildness=0.5`, chosen
@@ -234,21 +487,23 @@ infected_fraction ~0.20, labels from `generate_labeled_graph`'s majority-vote
 rollouts). See `demo_milestone2.py` for the full methodology and per-split
 breakdown, and `train_gat`'s docstring for the summary numbers.
 
+**Numbers below are POST the simulate_botnet neighbor-order fix** (see that
+dated entry) -- the fix changes `generate_labeled_graph`'s labels (since it
+seeds infection from the hub node, not node 0), so this comparison was
+rerun in full. The table originally reported 0.840/0.845/0.746 accuracy and
+0.178/0.380/0.624 recall for mildness 0.0/0.5/1.0 -- the pattern below is the
+same shape, if anything a cleaner version of it.
+
 | weight_mildness | test accuracy | vs. baseline (paired t-test) | recall (compromised) | F1 |
 |---|---|---|---|---|
-| 0.0 (unweighted) | 0.840 +/- 0.045 | p=0.003, significant | 0.178 | 0.294 |
-| **0.5 (chosen)** | **0.845 +/- 0.054** | **p=0.002, significant** | **0.380** | **0.465** |
-| 1.0 (fully balanced) | 0.746 +/- 0.054 | p=0.158, not significant | 0.624 | 0.483 (1/5 splits flagged unstable) |
+| 0.0 (unweighted) | 0.823 +/- 0.041 | p=0.029, significant | 0.178 | 0.267 |
+| **0.5 (chosen)** | **0.849 +/- 0.025** | **p=0.036, significant** | **0.457** | **0.537** |
+| 1.0 (fully balanced) | 0.760 +/- 0.047 | p=0.336, not significant | 0.581 | 0.498 (no split flagged unstable this run) |
 
 **Known limitation -- do not let this get lost before the final write-up:**
 even at the chosen mildness=0.5, recall on the compromised class is only
-**~38%**, meaning the model misses well over half of the actual compromised
-nodes on average across splits. Per-split recall is also still fairly
-variable (0.229-0.643 across the 5 splits), and two of five splits show
-seed-to-seed recall spread just under the convergence-instability flag
-threshold (std 0.158 and 0.202 vs. the 0.25 flag line used in
-`demo_milestone2.py`) -- not flagged as unstable, but not fully settled
-either.
+**~46%**, meaning the model still misses over half of the actual compromised
+nodes on average across splits.
 
 This is real, reproducible progress over the unweighted baseline (which
 systematically, consistently misses ~82% of compromised nodes -- confirmed
@@ -257,7 +512,7 @@ a mature or production-ready detector. The final write-up should describe
 this plainly rather than characterizing Milestone 2's classifier as solved.
 
 Full accuracy is also not the metric that matters here -- the unweighted
-model's higher raw accuracy (0.840 vs 0.845 is actually a wash) comes almost
-entirely from correctly classifying the easy majority (benign) class while
-still missing most compromised nodes, which is the opposite of what a
-security-relevant classifier should optimize for.
+model's higher raw accuracy is close to a wash against mildness=0.5's, and
+comes almost entirely from correctly classifying the easy majority (benign)
+class while still missing most compromised nodes, which is the opposite of
+what a security-relevant classifier should optimize for.

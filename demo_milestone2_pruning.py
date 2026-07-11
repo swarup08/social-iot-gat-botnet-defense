@@ -38,7 +38,6 @@ with the same full-rollout rigor as every other method for the numbers
 actually reported -- only the search itself uses the cheap signal.
 """
 
-import random
 import statistics
 import time
 
@@ -48,6 +47,7 @@ from src.milestone2 import (
     build_pyg_data,
     extract_degree_corrected_attention_scores,
     generate_labeled_graph,
+    make_node_split,
     train_gat,
 )
 from src.milestone2_pruning import (
@@ -56,6 +56,7 @@ from src.milestone2_pruning import (
     greedy_oracle_prune,
     measure_security,
     measure_utility,
+    pick_seed_nodes,
     plot_containment_ratio_vs_pruning_level,
     prune_highest_score,
     prune_lowest_score,
@@ -63,7 +64,6 @@ from src.milestone2_pruning import (
     score_edges_by_avg_hub_score,
     score_edges_by_betweenness,
 )
-from demo_milestone2 import make_node_split
 
 N_NODES = 300
 PRUNING_LEVELS = [0.10, 0.25, 0.50]
@@ -73,19 +73,6 @@ MODEL_SEED = 0
 SEED_NODE_RNG_SEED = 42
 CONTAINMENT_RATIO_EPSILON = 0.01
 GREEDY_ORACLE_SEARCH_ROLLOUTS = 1
-
-
-def pick_seed_nodes(graph, hub_node: int, mid_node: int) -> dict:
-    """hub + mid-degree + N_RANDOM_SEED_NODES random nodes, all distinct."""
-    rng = random.Random(SEED_NODE_RNG_SEED)
-    excluded = {hub_node, mid_node}
-    candidates = [n for n in graph.nodes() if n not in excluded]
-    random_nodes = rng.sample(candidates, N_RANDOM_SEED_NODES)
-
-    seed_nodes = {"hub": hub_node, "mid": mid_node}
-    for i, node in enumerate(random_nodes):
-        seed_nodes[f"random_{i + 1}"] = node
-    return seed_nodes
 
 
 def build_pruned_graphs_for_level(graph, gat_scores, degree_scores, betweenness_scores, p_uv, level, greedy_checkpoints):

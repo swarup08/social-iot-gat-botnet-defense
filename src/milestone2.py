@@ -120,6 +120,27 @@ def build_pyg_data(graph: nx.Graph, node_features: Dict[int, Dict[str, float]], 
     return Data(x=x, edge_index=edge_index, y=y)
 
 
+def make_node_split(n_nodes: int, train_frac: float = 0.6, val_frac: float = 0.2, seed: int = 0) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Randomly split node indices into train/val/test boolean masks.
+
+    This is a semi-supervised node-classification split (as in the original
+    GAT paper's Cora/Citeseer setup): all nodes and edges stay in the SAME
+    graph during training, only the labels used for the loss differ by mask.
+    """
+    generator = torch.Generator().manual_seed(seed)
+    permutation = torch.randperm(n_nodes, generator=generator)
+    n_train = int(train_frac * n_nodes)
+    n_val = int(val_frac * n_nodes)
+
+    train_mask = torch.zeros(n_nodes, dtype=torch.bool)
+    val_mask = torch.zeros(n_nodes, dtype=torch.bool)
+    test_mask = torch.zeros(n_nodes, dtype=torch.bool)
+    train_mask[permutation[:n_train]] = True
+    val_mask[permutation[n_train : n_train + n_val]] = True
+    test_mask[permutation[n_train + n_val :]] = True
+    return train_mask, val_mask, test_mask
+
+
 class GATNodeClassifier(nn.Module):
     """A small 2-layer multi-head GAT for benign (0) vs compromised (1) nodes.
 
@@ -231,30 +252,30 @@ def train_gat(
     infected_fraction ~0.20, labels from generate_labeled_graph's majority-vote
     rollouts):
 
-      mildness=0.0 (unweighted)     : test accuracy 0.840 +/- 0.045, beats the
+      mildness=0.0 (unweighted)     : test accuracy 0.823 +/- 0.041, beats the
                                        majority-class baseline significantly
-                                       (paired t-test p=0.003) -- but recall on
+                                       (paired t-test p=0.029) -- but recall on
                                        the compromised class is only 0.178: the
                                        model is systematically, reproducibly
                                        biased toward predicting "benign".
-      mildness=1.0 (fully balanced) : recall improves to 0.624, but accuracy
+      mildness=1.0 (fully balanced) : recall improves to 0.581, but accuracy
                                        drops below baseline (not significant,
-                                       p=0.158), and one of five splits showed
-                                       genuine training-convergence instability
-                                       -- recall swinging from 0.43 to 1.00
-                                       across model seeds trained on the exact
-                                       same data split.
-      mildness=0.5 (chosen default) : matches mildness=0.0's accuracy and
-                                       significance (0.845 +/- 0.054, p=0.002)
-                                       while more than doubling recall (0.380)
-                                       and F1 (0.465) relative to unweighted,
-                                       with no split flagged for convergence
-                                       instability.
+                                       p=0.336).
+      mildness=0.5 (chosen default) : matches (fractionally exceeds)
+                                       mildness=0.0's accuracy and significance
+                                       (0.849 +/- 0.025, p=0.036) while more
+                                       than doubling recall (0.457) and F1
+                                       (0.537) relative to unweighted.
+
+    (Numbers current as of the simulate_botnet neighbor-order fix -- see
+    NOTES.md's "simulate_botnet neighbor-order bug" entry; re-running this
+    comparison after that fix changed the exact numbers but not the
+    conclusion, which held up slightly more cleanly than before.)
 
     This is still a real, standing limitation, not a solved problem: even at
-    mildness=0.5, recall of ~38% means the model misses well over half the
-    actual compromised nodes on average. See NOTES.md and demo_milestone2.py
-    for the full per-split breakdown and methodology.
+    mildness=0.5, recall of ~46% means the model still misses close to half
+    the actual compromised nodes on average. See NOTES.md and
+    demo_milestone2.py for the full per-split breakdown and methodology.
 
     If log_history=True, additionally returns a per-epoch history dict with
     "train_loss"/"train_acc" lists (and "val_loss"/"val_acc" too, if val_mask

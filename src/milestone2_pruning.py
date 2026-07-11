@@ -39,6 +39,24 @@ from src.milestone1 import simulate_botnet
 from src.milestone2 import accuracy, build_pyg_data, precision_recall_f1_counts, train_gat
 
 
+def pick_seed_nodes(graph: nx.Graph, hub_node: int, mid_node: int, n_random: int = 3, rng_seed: int = 42) -> Dict[str, int]:
+    """hub + mid-degree + n_random random nodes, all distinct.
+
+    Used to build the multi-seed set that every security measurement in
+    Milestones 2-3 averages over, instead of a single fixed infection seed
+    (see NOTES.md's fixed-hub-seed-artifact entry for why that matters).
+    """
+    rng = random.Random(rng_seed)
+    excluded = {hub_node, mid_node}
+    candidates = [n for n in graph.nodes() if n not in excluded]
+    random_nodes = rng.sample(candidates, n_random)
+
+    seed_nodes = {"hub": hub_node, "mid": mid_node}
+    for i, node in enumerate(random_nodes):
+        seed_nodes[f"random_{i + 1}"] = node
+    return seed_nodes
+
+
 def score_edges_by_avg_hub_score(graph: nx.Graph, node_features: Dict[int, Dict[str, float]]) -> Dict[Tuple[int, int], float]:
     """Degree-centrality edge score: average of the two endpoints' hub_score."""
     return {(u, v): (node_features[u]["hub_score"] + node_features[v]["hub_score"]) / 2 for u, v in graph.edges()}
@@ -285,6 +303,40 @@ def measure_utility(
     """
     pruned_data = build_pyg_data(pruned_graph, node_features, labels)
     model = train_gat(pruned_data, train_mask, model_seed=model_seed, epochs=epochs)
+    with torch.no_grad():
+        logits = model(pruned_data.x, pruned_data.edge_index)
+        predictions = logits.argmax(dim=1)
+
+    result = precision_recall_f1_counts(predictions, pruned_data.y, test_mask, compromised_class)
+    result["test_acc"] = accuracy(predictions, pruned_data.y, test_mask)
+    return result
+
+
+def measure_utility_frozen(
+    model,
+    pruned_graph: nx.Graph,
+    node_features: Dict[int, Dict[str, float]],
+    labels: Dict[int, int],
+    test_mask: torch.Tensor,
+    compromised_class: int = 1,
+) -> Dict[str, float]:
+    """Utility of a FIXED, already-trained model on a (possibly pruned) graph
+    topology -- a forward pass only, no retraining.
+
+    Milestone 3's RL reward needs a cheap, deterministic utility signal at
+    every step (retraining, as measure_utility does, is far too slow to call
+    hundreds/thousands of times per training run -- see NOTES.md). Since the
+    model is frozen and eval-mode is deterministic, this adds zero randomness
+    to the reward, on top of being ~1ms vs. measure_utility's ~3.6s.
+
+    NOTE (see NOTES.md): this is NOT the same utility definition Milestone 2's
+    baseline comparison table uses (which retrains a fresh GAT per pruned
+    graph). Before comparing RL results against Milestone 2's baselines,
+    re-measure the baselines with THIS function too, so the comparison is on
+    a consistent utility definition.
+    """
+    pruned_data = build_pyg_data(pruned_graph, node_features, labels)
+    model.eval()
     with torch.no_grad():
         logits = model(pruned_data.x, pruned_data.edge_index)
         predictions = logits.argmax(dim=1)

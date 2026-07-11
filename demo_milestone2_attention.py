@@ -33,11 +33,11 @@ from src.milestone2 import (
     extract_degree_corrected_attention_scores,
     extract_edge_attention_scores,
     generate_labeled_graph,
+    make_node_split,
     plot_attention_score_distribution,
     plot_attention_vs_metric,
     train_gat,
 )
-from demo_milestone2 import make_node_split
 
 N_NODES = 300
 

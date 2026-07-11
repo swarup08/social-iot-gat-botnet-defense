@@ -8,8 +8,7 @@ run converges (smoothly vs. noisily, over/underfitting), not to compare
 methods.
 """
 
-from src.milestone2 import build_pyg_data, generate_labeled_graph, plot_training_curves, train_gat
-from demo_milestone2 import make_node_split
+from src.milestone2 import build_pyg_data, generate_labeled_graph, make_node_split, plot_training_curves, train_gat
 
 
 def main() -> None:

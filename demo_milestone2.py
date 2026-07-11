@@ -28,7 +28,7 @@ import statistics
 import torch
 from scipy import stats
 
-from src.milestone2 import accuracy, build_pyg_data, generate_labeled_graph, precision_recall_f1_counts, train_gat
+from src.milestone2 import accuracy, build_pyg_data, generate_labeled_graph, make_node_split, precision_recall_f1_counts, train_gat
 
 N_NODES = 300  # sized so ~20% test masks have comfortably double-digit+ compromised nodes
 EPOCHS = 300
@@ -39,27 +39,6 @@ COMPROMISED_CLASS = 1
 # hardness) if recall varies this much across model seeds trained on the SAME
 # split -- i.e. some inits find the compromised nodes and others don't.
 WITHIN_SPLIT_RECALL_STD_FLAG = 0.25
-
-
-def make_node_split(n_nodes: int, train_frac: float = 0.6, val_frac: float = 0.2, seed: int = 0):
-    """Randomly split node indices into train/val/test boolean masks.
-
-    This is a semi-supervised node-classification split (as in the original
-    GAT paper's Cora/Citeseer setup): all nodes and edges stay in the SAME
-    graph during training, only the labels used for the loss differ by mask.
-    """
-    generator = torch.Generator().manual_seed(seed)
-    permutation = torch.randperm(n_nodes, generator=generator)
-    n_train = int(train_frac * n_nodes)
-    n_val = int(val_frac * n_nodes)
-
-    train_mask = torch.zeros(n_nodes, dtype=torch.bool)
-    val_mask = torch.zeros(n_nodes, dtype=torch.bool)
-    test_mask = torch.zeros(n_nodes, dtype=torch.bool)
-    train_mask[permutation[:n_train]] = True
-    val_mask[permutation[n_train : n_train + n_val]] = True
-    test_mask[permutation[n_train + n_val :]] = True
-    return train_mask, val_mask, test_mask
 
 
 def majority_baseline_accuracy(y: torch.Tensor, train_mask: torch.Tensor, test_mask: torch.Tensor) -> float:
