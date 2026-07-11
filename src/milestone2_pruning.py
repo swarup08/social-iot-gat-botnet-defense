@@ -146,6 +146,73 @@ def calibrate_topk_for_target_fraction(
     return best_k, best_pruned, best_fraction
 
 
+def greedy_oracle_prune(
+    graph: nx.Graph,
+    p_uv: Dict[Tuple[int, int], float],
+    seed_nodes: Dict[str, int],
+    max_remove_fraction: float,
+    checkpoint_fractions: List[float],
+    search_rollouts: int = 1,
+) -> Dict[float, nx.Graph]:
+    """Greedily remove edges one at a time -- at each step, whichever
+    remaining edge most reduces simulated infection (averaged across
+    seed_nodes) -- as an upper-bound reference the supervisor explicitly
+    requested. This is the one pruning method that looks at simulate_botnet
+    OUTCOMES directly rather than a structural/attention score, so it's
+    expensive: reaching a 50% removal target on an ~900-edge graph needs
+    roughly (max_removals x avg_remaining_edges) candidate evaluations
+    (~300K here), each running one simulate_botnet rollout per seed node.
+
+    COMPUTE COST TRADE-OFF (report this alongside the numbers, per this
+    project's own standard for RL/expensive methods): to keep that
+    tractable, the SEARCH itself uses only search_rollouts (default 1)
+    rollout per seed node per candidate -- a cheap, noisier signal used only
+    to RANK candidates at each step. This does NOT weaken the reported
+    security numbers: callers should re-measure the returned checkpoint
+    graphs with the same full-rollout measure_security used for every other
+    method (this function returns graphs, not final metrics). Edges are
+    removed via in-place remove/restore during the search (not graph
+    copying) to keep the ~300K candidate evaluations affordable at all --
+    copying the whole graph that many times would dominate runtime.
+
+    Reuses ONE incremental removal sequence for every level in
+    checkpoint_fractions (each checkpoint's edge set is a strict subset of
+    the previous one's), since the greedy trajectory up to 50% already
+    passes through whatever it did at 25% and 10% -- so this costs one
+    greedy run total, not one per pruning level.
+    """
+    working_graph = graph.copy()
+    total_edges = graph.number_of_edges()
+    max_removals = round(max_remove_fraction * total_edges)
+    # Map "how many removals in" -> which checkpoint fraction that corresponds to.
+    removals_at_checkpoint = {round(fraction * total_edges): fraction for fraction in checkpoint_fractions}
+
+    checkpoints: Dict[float, nx.Graph] = {}
+    for step in range(1, max_removals + 1):
+        best_edge, best_score = None, None
+        for u, v in list(working_graph.edges()):
+            edge_attrs = working_graph.get_edge_data(u, v)
+            working_graph.remove_edge(u, v)
+
+            total_infected = 0.0
+            for seed_node in seed_nodes.values():
+                for rollout in range(search_rollouts):
+                    result = simulate_botnet(working_graph, p_uv, initial_compromised={seed_node}, seed=rollout)
+                    total_infected += len(result["infected_nodes"]) / working_graph.number_of_nodes()
+
+            working_graph.add_edge(u, v, **edge_attrs)  # restore before testing the next candidate
+
+            if best_score is None or total_infected < best_score:
+                best_score, best_edge = total_infected, (u, v)
+
+        working_graph.remove_edge(*best_edge)  # commit the best candidate from this step
+
+        if step in removals_at_checkpoint:
+            checkpoints[removals_at_checkpoint[step]] = working_graph.copy()
+
+    return checkpoints
+
+
 def measure_security_and_utility(
     original_graph: nx.Graph,
     pruned_graph: nx.Graph,

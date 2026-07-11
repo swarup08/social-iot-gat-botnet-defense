@@ -24,11 +24,23 @@ project:
 Implements the roadmap's static pruning strategies (threshold-based and
 top-k-per-node, both using the degree-corrected GAT attention score)
 alongside the supervisor-mandated baseline suite (random, degree-centrality,
-betweenness-centrality, highest-p_uv removal).
+betweenness-centrality, highest-p_uv removal) AND a greedy oracle -- at each
+level, whichever edge most reduces simulated infection is removed, one at a
+time -- the supervisor explicitly requested as a reference for how much a
+strategy that looks at outcomes directly, rather than a structural/attention
+score, can achieve. NOT labeled an "upper bound" here: it uses a cheap
+1-rollout search signal for tractability (~300K candidate evaluations to
+reach 50% removal) and empirically does NOT outperform several cheap
+heuristics at 10-25% removal -- see NOTES.md's greedy-oracle entry for why,
+and greedy_oracle_prune's docstring in src/milestone2_pruning.py for the
+compute-cost trade-off. The checkpoint graphs it returns ARE re-measured
+with the same full-rollout rigor as every other method for the numbers
+actually reported -- only the search itself uses the cheap signal.
 """
 
 import random
 import statistics
+import time
 
 from src.milestone1 import build_edge_features, compute_edge_infection_probabilities
 from src.milestone2 import (
@@ -41,6 +53,7 @@ from src.milestone2 import (
 from src.milestone2_pruning import (
     calibrate_topk_for_target_fraction,
     containment_ratio,
+    greedy_oracle_prune,
     measure_security,
     measure_utility,
     plot_containment_ratio_vs_pruning_level,
@@ -59,6 +72,7 @@ N_RANDOM_SEED_NODES = 3
 MODEL_SEED = 0
 SEED_NODE_RNG_SEED = 42
 CONTAINMENT_RATIO_EPSILON = 0.01
+GREEDY_ORACLE_SEARCH_ROLLOUTS = 1
 
 
 def pick_seed_nodes(graph, hub_node: int, mid_node: int) -> dict:
@@ -74,7 +88,7 @@ def pick_seed_nodes(graph, hub_node: int, mid_node: int) -> dict:
     return seed_nodes
 
 
-def build_pruned_graphs_for_level(graph, gat_scores, degree_scores, betweenness_scores, p_uv, level):
+def build_pruned_graphs_for_level(graph, gat_scores, degree_scores, betweenness_scores, p_uv, level, greedy_checkpoints):
     """One pruned graph per method at this level (random gets N_RANDOM_PRUNE_REPEATS draws)."""
     pruned = {}
     pruned["GAT threshold (lowest s_uv removed)"] = [prune_lowest_score(graph, gat_scores, level)]
@@ -86,6 +100,9 @@ def build_pruned_graphs_for_level(graph, gat_scores, degree_scores, betweenness_
     pruned["betweenness-centrality (highest removed)"] = [prune_highest_score(graph, betweenness_scores, level)]
     pruned["highest-p_uv (highest removed)"] = [prune_highest_score(graph, p_uv, level)]
     pruned["random"] = [prune_random(graph, level, seed=1000 * repeat + 7) for repeat in range(N_RANDOM_PRUNE_REPEATS)]
+    # NOT labeled "(upper bound)" -- see NOTES.md: it doesn't empirically
+    # behave as one at 10-25% removal with this 1-rollout search signal.
+    pruned["greedy oracle"] = [greedy_checkpoints[level]]
     return pruned
 
 
@@ -126,10 +143,18 @@ def main() -> None:
         f"precision={baseline_utility['precision']:.3f} (accuracy={baseline_utility['test_acc']:.3f}, shown for reference only)"
     )
 
+    print(f"\nrunning greedy oracle search (1 rollout/candidate for tractability; re-measured at full rigor below)...")
+    oracle_start = time.time()
+    greedy_checkpoints = greedy_oracle_prune(
+        graph, p_uv, seed_nodes, max_remove_fraction=max(PRUNING_LEVELS), checkpoint_fractions=PRUNING_LEVELS, search_rollouts=GREEDY_ORACLE_SEARCH_ROLLOUTS
+    )
+    oracle_seconds = time.time() - oracle_start
+    print(f"  greedy oracle search took {oracle_seconds:.1f}s total (all {len(PRUNING_LEVELS)} checkpoints, one incremental run)")
+
     results = []
     for level in PRUNING_LEVELS:
         print(f"\n--- pruning level: {level:.0%} ---")
-        pruned_by_method = build_pruned_graphs_for_level(graph, gat_scores, degree_scores, betweenness_scores, p_uv, level)
+        pruned_by_method = build_pruned_graphs_for_level(graph, gat_scores, degree_scores, betweenness_scores, p_uv, level, greedy_checkpoints)
 
         for method, variants in pruned_by_method.items():
             utilities, fraction_removed, all_ratios = [], [], {name: [] for name in seed_nodes}
@@ -184,6 +209,11 @@ def main() -> None:
         )
     if any(r["involves_low_baseline_seed"] for r in results):
         print("* one or more pooled seeds had a near-zero unpruned baseline; those seeds' ratios are noted as unreliable above.")
+    print(
+        f"\ncompute cost note: the greedy oracle's search took {oracle_seconds:.1f}s total (all 3 checkpoints) vs. "
+        f"~0.01s per structural/attention method -- the cost of looking at simulate_botnet outcomes directly instead "
+        f"of a precomputed score, reported here per this project's standard for expensive methods."
+    )
 
     plot_path = plot_containment_ratio_vs_pruning_level(results)
     print(f"\nsaved trade-off plot to {plot_path}")

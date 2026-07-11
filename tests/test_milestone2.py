@@ -1,3 +1,4 @@
+import os
 import unittest
 
 import torch
@@ -8,6 +9,7 @@ from src.milestone2 import (
     compute_class_weights,
     generate_labeled_graph,
     node_features_to_matrix,
+    plot_training_curves,
     train_gat,
 )
 
@@ -90,6 +92,28 @@ class Milestone2Tests(unittest.TestCase):
         with torch.no_grad():
             logits = model(data.x, data.edge_index)
         self.assertEqual(logits.shape, (data.num_nodes, 2))
+
+    def test_train_gat_log_history_is_opt_in_and_default_is_unaffected(self):
+        graph, node_features, labels = generate_labeled_graph(n_nodes=30, m=2, n_rollouts=3)
+        data = build_pyg_data(graph, node_features, labels)
+        train_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+        val_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+        train_mask[:15] = True
+        val_mask[15:20] = True
+
+        # Default behavior (log_history=False) must still return just the model.
+        default_result = train_gat(data, train_mask, epochs=5)
+        self.assertIsInstance(default_result, GATNodeClassifier)
+
+        model, history = train_gat(data, train_mask, val_mask=val_mask, log_history=True, epochs=5)
+        self.assertIsInstance(model, GATNodeClassifier)
+        for key in ("train_loss", "train_acc", "val_loss", "val_acc"):
+            self.assertIn(key, history)
+            self.assertEqual(len(history[key]), 5)
+
+        path = plot_training_curves(history, output_path="test_training_curves_tmp.png")
+        self.assertTrue(os.path.exists(path))
+        os.remove(path)
 
 
 if __name__ == "__main__":

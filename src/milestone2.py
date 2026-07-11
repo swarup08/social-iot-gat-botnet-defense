@@ -220,7 +220,9 @@ def train_gat(
     epochs: int = 300,
     lr: float = 0.01,
     weight_decay: float = 5e-4,
-) -> GATNodeClassifier:
+    val_mask: torch.Tensor = None,
+    log_history: bool = False,
+):
     """Train a GATNodeClassifier on `data`, using only `train_mask` for the loss.
 
     weight_mildness defaults to 0.5, chosen from a three-way comparison run in
@@ -253,11 +255,25 @@ def train_gat(
     mildness=0.5, recall of ~38% means the model misses well over half the
     actual compromised nodes on average. See NOTES.md and demo_milestone2.py
     for the full per-split breakdown and methodology.
+
+    If log_history=True, additionally returns a per-epoch history dict with
+    "train_loss"/"train_acc" lists (and "val_loss"/"val_acc" too, if val_mask
+    is given) -- one entry per epoch, satisfying the roadmap's "log training
+    and validation loss versus epochs" task. This is purely additive and
+    opt-in: log_history defaults to False, so every existing call site is
+    unaffected and still gets just the trained model back.
     """
     torch.manual_seed(model_seed)  # seeds both weight init and dropout stochasticity
     model = GATNodeClassifier(in_channels=data.num_node_features)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     class_weights = compute_class_weights(data.y, train_mask, mildness=weight_mildness) if weight_mildness > 0 else None
+
+    history = None
+    if log_history:
+        history = {"train_loss": [], "train_acc": []}
+        if val_mask is not None:
+            history["val_loss"] = []
+            history["val_acc"] = []
 
     for _ in range(epochs):
         model.train()
@@ -269,7 +285,25 @@ def train_gat(
         loss.backward()
         optimizer.step()
 
+        if log_history:
+            # A separate eval-mode forward pass (dropout off) for logging, so
+            # the recorded loss/accuracy reflect the model's actual inference
+            # behavior rather than the noisier dropout-affected training pass.
+            model.eval()
+            with torch.no_grad():
+                eval_logits = model(data.x, data.edge_index)
+                predictions = eval_logits.argmax(dim=1)
+                train_loss = F.cross_entropy(eval_logits[train_mask], data.y[train_mask], weight=class_weights).item()
+                history["train_loss"].append(train_loss)
+                history["train_acc"].append(accuracy(predictions, data.y, train_mask))
+                if val_mask is not None:
+                    val_loss = F.cross_entropy(eval_logits[val_mask], data.y[val_mask], weight=class_weights).item()
+                    history["val_loss"].append(val_loss)
+                    history["val_acc"].append(accuracy(predictions, data.y, val_mask))
+
     model.eval()
+    if log_history:
+        return model, history
     return model
 
 
@@ -427,4 +461,45 @@ def plot_attention_vs_metric(s_values: np.ndarray, metric_values: np.ndarray, me
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     plt.close()
+    return output_path
+
+
+def plot_training_curves(history: Dict[str, List[float]], output_path: str = "training_curves.png") -> str:
+    """Plot training/validation loss and accuracy vs. epoch, side by side.
+
+    `history` is the dict returned by train_gat(..., log_history=True):
+    "train_loss"/"train_acc" always present, "val_loss"/"val_acc" present if
+    a val_mask was given. Satisfies the roadmap's "log training and
+    validation loss versus epochs" task -- this is the convergence diagnostic
+    that the split/seed-averaged accuracy numbers elsewhere don't show: how
+    smoothly (or not) a single training run actually converges.
+    """
+    epochs = list(range(1, len(history["train_loss"]) + 1))
+    has_val = "val_loss" in history
+
+    fig, (loss_ax, acc_ax) = plt.subplots(1, 2, figsize=(11, 4.5))
+
+    loss_ax.plot(epochs, history["train_loss"], color="steelblue", linewidth=1.8, label="train")
+    if has_val:
+        loss_ax.plot(epochs, history["val_loss"], color="darkorange", linewidth=1.8, label="validation")
+    loss_ax.set_xlabel("epoch")
+    loss_ax.set_ylabel("cross-entropy loss")
+    loss_ax.set_title("Loss vs. epoch")
+    loss_ax.grid(True, alpha=0.3)
+    loss_ax.legend()
+
+    acc_ax.plot(epochs, history["train_acc"], color="steelblue", linewidth=1.8, label="train")
+    if has_val:
+        acc_ax.plot(epochs, history["val_acc"], color="darkorange", linewidth=1.8, label="validation")
+    acc_ax.set_xlabel("epoch")
+    acc_ax.set_ylabel("accuracy")
+    acc_ax.set_title("Accuracy vs. epoch")
+    acc_ax.set_ylim(0, 1)
+    acc_ax.grid(True, alpha=0.3)
+    acc_ax.legend()
+
+    fig.suptitle("GAT training convergence (representative run)")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
     return output_path

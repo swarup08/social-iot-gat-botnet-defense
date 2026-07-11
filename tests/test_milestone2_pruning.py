@@ -2,8 +2,11 @@ import unittest
 
 import networkx as nx
 
+from src.milestone1 import build_edge_features, build_node_features, compute_edge_infection_probabilities
+from src.milestone2 import DEFAULT_BETA
 from src.milestone2_pruning import (
     calibrate_topk_for_target_fraction,
+    greedy_oracle_prune,
     prune_highest_score,
     prune_lowest_score,
     prune_random,
@@ -71,6 +74,30 @@ class Milestone2PruningTests(unittest.TestCase):
 
         for u, v in self.graph.edges():
             self.assertTrue((u, v) in scores or (v, u) in scores)
+
+    def test_greedy_oracle_prune_removes_correct_counts_and_nests_checkpoints(self):
+        graph = nx.barabasi_albert_graph(25, 2, seed=2)
+        node_features = build_node_features(graph)
+        edge_features = build_edge_features(graph)
+        p_uv = compute_edge_infection_probabilities(graph, node_features, edge_features, beta=DEFAULT_BETA)
+        degrees = dict(graph.degree())
+        seed_nodes = {"hub": max(degrees, key=degrees.get)}
+
+        checkpoints = greedy_oracle_prune(
+            graph, p_uv, seed_nodes, max_remove_fraction=0.3, checkpoint_fractions=[0.1, 0.3], search_rollouts=1
+        )
+
+        self.assertEqual(set(checkpoints.keys()), {0.1, 0.3})
+        n_original = graph.number_of_edges()
+        for fraction, pruned in checkpoints.items():
+            self.assertEqual(pruned.number_of_nodes(), graph.number_of_nodes())
+            self.assertEqual(n_original - pruned.number_of_edges(), round(fraction * n_original))
+        # The 0.3 checkpoint should be a strict subset of the 0.1 checkpoint's
+        # edges (same incremental greedy trajectory, just further along).
+        self.assertTrue(set(checkpoints[0.3].edges()) <= set(checkpoints[0.1].edges()))
+        # The original graph object must be untouched (in-place remove/restore
+        # during the search shouldn't leak into the caller's graph).
+        self.assertEqual(graph.number_of_edges(), n_original)
 
 
 if __name__ == "__main__":

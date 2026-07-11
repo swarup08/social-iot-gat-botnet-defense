@@ -3,6 +3,78 @@
 Running log of findings that need to survive into the final write-up but
 don't belong in code comments or README. Newest entries at the top.
 
+## 2026-07-11 -- Milestone 2 training convergence: plateaus well before 300 epochs, mild overfitting in the tail
+
+Added optional per-epoch train/val loss+accuracy logging to `train_gat`
+(`log_history=True`, off by default -- see `demo_milestone2_convergence.py`
+and `training_curves.png`). On a representative run (n=300 nodes, split
+seed 0): both losses drop sharply for ~75-100 epochs, then train loss keeps
+slowly decreasing while validation loss flattens and drifts up slightly
+(best val_loss at epoch 281 of 300, but the whole 150-300 range is a noisy
+plateau, not a clear minimum) -- a mild, unsurprising overfitting signature
+given dropout is already regularizing against it. Practical takeaway: 300
+epochs is more than strictly needed for convergence on this graph size;
+kept as the default anyway since the cost is small and this hasn't been
+tuned/validated across multiple graphs yet (that's Milestone 3 territory).
+
+## 2026-07-11 -- Milestone 2 greedy oracle: does NOT behave as an upper bound at low pruning levels (search-signal noise), only catches up by 50%
+
+Added the supervisor-requested greedy oracle baseline
+(`greedy_oracle_prune`, `src/milestone2_pruning.py`): at each step, remove
+whichever remaining edge most reduces simulated infection (averaged across
+the same 5 seed nodes used everywhere else), one at a time. A full O(steps x
+remaining_edges) search to 50% removal needs ~300K candidate evaluations on
+this ~900-edge graph -- empirically ~25s total (all 3 checkpoints, one
+incremental run) using in-place edge remove/restore (not graph copying) and
+a cheap 1-rollout-per-candidate search signal. The checkpoint graphs it
+returns ARE re-measured with the same full-rollout rigor as every other
+method for the reported numbers -- only the SEARCH itself uses the cheap
+signal.
+
+**Result, stated plainly (see the updated containment_ratio_vs_pruning_level.png):**
+the oracle is NOT the best-performing method at low pruning levels --
+at 10% removal its containment ratio (0.599+/-0.123) is WORSE than 4 of the
+5 other methods (degree-centrality 0.395, highest-p_uv 0.379, GAT top-k
+0.402, betweenness 0.451), beating only random (0.703). At 25% it's still
+mid-pack (0.223 vs. 0.104-0.129 for the structural methods). It only
+converges with the pack by 50% (0.035, tied with GAT top-k/degree-
+centrality/highest-p_uv). It DOES show the best utility (recall/F1) at
+every level, notably 0.500 recall / 0.571 F1 at 50% -- the best F1 in the
+entire table.
+
+**Follow-up diagnostic (same day): confirmed as myopia, not search noise.**
+Reran the search with search_rollouts=5 instead of 1 (everything else
+identical -- same graph, seeds, checkpoints; final numbers still measured at
+full rigor). If noise were the main cause, more rollouts should have
+consistently closed the gap at every level. It didn't:
+
+| level | search_rollouts=1 | search_rollouts=5 | other methods' range |
+|---|---|---|---|
+| 10% | 0.599 | **0.711 (worse)** | 0.10-0.45 |
+| 25% | 0.223 | 0.191 (barely better) | 0.10-0.13 |
+| 50% | 0.035 | 0.019 (now best) | ~0.03 |
+
+At 10% -- where the gap was largest -- 5x the search signal made
+containment measurably WORSE, not better, and 25% barely moved and
+remained clearly mid-pack. Only at 50% did more rollouts help meaningfully.
+This is the opposite of what the noise hypothesis predicts (consistent
+improvement at every level) and matches the myopia hypothesis instead:
+early in the trajectory, picking the single locally-best edge one at a time
+just doesn't find as good a combination as a heuristic that ranks ALL edges
+by a global criterion at once, no matter how accurately each candidate is
+scored. The 5-rollout search also cost ~415s vs. ~25s (~16x, more than the
+naive 5x) for no reliable improvement at the levels that mattered -- not
+pursuing higher rollout counts further, per the "confirm and stop" scope of
+this diagnostic.
+
+**Consequence for the write-up:** do NOT call this method an "upper bound"
+without this caveat attached -- the plot/table label it plainly as "greedy
+oracle" (no parenthetical claim) for exactly this reason, and this stands
+confirmed, not just suspected. Report it as "a greedy, outcome-driven
+baseline that only pays off at higher pruning levels because of its
+inherent one-step-at-a-time myopia," not as a validated ceiling on
+achievable containment.
+
 ## 2026-07-11 -- Milestone 2 pruning: corrected re-run (multi-seed containment ratio + recall/F1) -- no method dominates; GAT top-k looks most balanced but NOT statistically confirmed
 
 Follow-up to the fixed-hub-seed artifact entry directly below: re-ran the full
