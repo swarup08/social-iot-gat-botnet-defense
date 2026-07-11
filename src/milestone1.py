@@ -225,6 +225,30 @@ def plot_infection_history(infection_history: List[int], output_path: str = "inf
     return output_path
 
 
+def plot_infection_curves_comparison(curves: Dict[str, List[float]], total_nodes: int, output_path: str = "infection_curves_comparison.png") -> str:
+    """Overlay several named infection curves (infected count vs. round) on one
+    plot, as infected FRACTION so different methods' curves are directly
+    comparable against the same 0-1 y-axis regardless of how many edges each
+    one removed. Each curve is plotted out to its own last round; the roadmap's
+    "compare infection curves for no pruning vs. static vs. RL pruning" figure.
+    """
+    plt.figure(figsize=(7, 4.5))
+    for label, counts in curves.items():
+        steps = list(range(len(counts)))
+        fractions = [c / total_nodes for c in counts]
+        plt.plot(steps, fractions, marker="o", markersize=3, linewidth=1.8, label=label)
+    plt.xlabel("time step (round)")
+    plt.ylabel("infected fraction")
+    plt.title("Botnet infection curves: no pruning vs. static vs. RL pruning")
+    plt.ylim(0, 1)
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    return output_path
+
+
 def plot_degree_distribution(graph: nx.Graph, output_path: str = "degree_distribution.png") -> str:
     """Plot the degree distribution of the graph.
 

@@ -185,6 +185,82 @@ class GATNodeClassifier(nn.Module):
         return x  # raw logits; combine with CrossEntropyLoss / softmax outside
 
 
+class GATNodeClassifierNLayer(nn.Module):
+    """Variable-depth version of GATNodeClassifier, used only by Milestone 4's
+    GAT-depth ablation (1 vs 2 vs 3 layers).
+
+    GATNodeClassifier (above) hardcodes exactly 2 layers, and its attention
+    extraction assumes that structurally -- this class exists so depth can be
+    varied WITHOUT touching that already-validated 2-layer path, which stays
+    the architecture used everywhere else in this project. With n_layers=2,
+    hidden_channels=8, heads=4, this class is architecturally identical to
+    GATNodeClassifier (same layer widths, same activation placement).
+    """
+
+    def __init__(self, in_channels: int, n_layers: int = 2, hidden_channels: int = 8, heads: int = 4, dropout: float = 0.3):
+        super().__init__()
+        assert n_layers >= 1, "GATNodeClassifierNLayer needs at least 1 layer"
+        self.dropout = dropout
+        self.layers = nn.ModuleList()
+        if n_layers == 1:
+            # A single attention hop straight from input features to the 2
+            # output logits -- no hidden representation at all.
+            self.layers.append(GATConv(in_channels, 2, heads=1, concat=False, dropout=dropout))
+        else:
+            self.layers.append(GATConv(in_channels, hidden_channels, heads=heads, dropout=dropout))
+            for _ in range(n_layers - 2):  # any additional hidden layers, width unchanged
+                self.layers.append(GATConv(hidden_channels * heads, hidden_channels, heads=heads, dropout=dropout))
+            self.layers.append(GATConv(hidden_channels * heads, 2, heads=1, concat=False, dropout=dropout))
+
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+        x = F.dropout(x, p=self.dropout, training=self.training)
+        for i, layer in enumerate(self.layers):
+            x = layer(x, edge_index)
+            if i < len(self.layers) - 1:  # ELU + dropout between layers only, not after the final logits layer
+                x = F.elu(x)
+                x = F.dropout(x, p=self.dropout, training=self.training)
+        return x
+
+
+def _extract_directed_attention_nlayer(model: GATNodeClassifierNLayer, data: Data) -> torch.Tensor:
+    """Same idea as _extract_directed_attention, generalized to however many
+    layers `model.layers` actually has -- used only for the depth ablation.
+    Averages attention over heads within each layer, then over all layers.
+    """
+    model.eval()
+    n_directed = data.edge_index.shape[1]
+
+    layer_scores = []
+    with torch.no_grad():
+        x = data.x
+        for i, layer in enumerate(model.layers):
+            x, (edge_index_i, alpha_i) = layer(x, data.edge_index, return_attention_weights=True)
+            assert torch.equal(edge_index_i[:, :n_directed], data.edge_index)
+            layer_scores.append(alpha_i[:n_directed].mean(dim=1))  # mean over this layer's heads
+            if i < len(model.layers) - 1:
+                x = F.elu(x)
+    return torch.stack(layer_scores, dim=0).mean(dim=0)  # mean over all layers
+
+
+def extract_degree_corrected_attention_scores_nlayer(model: GATNodeClassifierNLayer, data: Data, graph: nx.Graph) -> Dict[Tuple[int, int], float]:
+    """Degree-corrected attention scores for GATNodeClassifierNLayer -- identical
+    correction math to extract_degree_corrected_attention_scores, just built on
+    top of _extract_directed_attention_nlayer instead of the fixed-2-layer version.
+    """
+    directed_score = _extract_directed_attention_nlayer(model, data)
+    n_edges = data.edge_index.shape[1] // 2
+    degree = dict(graph.degree())
+
+    targets = data.edge_index[1, : 2 * n_edges].tolist()
+    corrected = torch.tensor([directed_score[i].item() * degree[target] for i, target in enumerate(targets)])
+
+    forward_score = corrected[:n_edges]
+    backward_score = corrected[n_edges : 2 * n_edges]
+
+    edges = list(zip(data.edge_index[0, :n_edges].tolist(), data.edge_index[1, :n_edges].tolist()))
+    return {(u, v): float((forward_score[i] + backward_score[i]) / 2.0) for i, (u, v) in enumerate(edges)}
+
+
 def accuracy(predictions: torch.Tensor, y: torch.Tensor, mask: torch.Tensor) -> float:
     return (predictions[mask] == y[mask]).float().mean().item()
 
@@ -244,6 +320,7 @@ def train_gat(
     val_mask: torch.Tensor = None,
     log_history: bool = False,
     heads: int = 4,
+    model_factory=None,
 ):
     """Train a GATNodeClassifier on `data`, using only `train_mask` for the loss.
 
@@ -284,9 +361,16 @@ def train_gat(
     and validation loss versus epochs" task. This is purely additive and
     opt-in: log_history defaults to False, so every existing call site is
     unaffected and still gets just the trained model back.
+
+    model_factory, if given, is called with no arguments to construct the
+    model instead of building the default GATNodeClassifier(heads=heads) --
+    used by Milestone 4's depth ablation to train GATNodeClassifierNLayer
+    variants through this same training loop. The manual_seed call happens
+    BEFORE the factory runs (same ordering as the default path), so a
+    model_factory's weight init is exactly as reproducible as the default.
     """
     torch.manual_seed(model_seed)  # seeds both weight init and dropout stochasticity
-    model = GATNodeClassifier(in_channels=data.num_node_features, heads=heads)
+    model = model_factory() if model_factory is not None else GATNodeClassifier(in_channels=data.num_node_features, heads=heads)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     class_weights = compute_class_weights(data.y, train_mask, mildness=weight_mildness) if weight_mildness > 0 else None
 

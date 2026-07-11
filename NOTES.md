@@ -3,6 +3,82 @@
 Running log of findings that need to survive into the final write-up but
 don't belong in code comments or README. Newest entries at the top.
 
+## 2026-07-11 -- Milestone 4 GAT-depth and feature-masking ablations RESULTS: depth=2 is a sharp, two-sided sweet spot; missingness confirms robustness like noise did (COMPLETES THE REMAINING TWO OPTIONAL ABLATION GAPS)
+
+`demo_milestone4_depth_and_masking_ablation.py` (15 graphs, containment
+only, no RL/greedy oracle -- same shape as the heads/noise ablation).
+Completed in 246s (~4 min). Fills the two gaps flagged after that earlier
+ablation: the roadmap's GAT-architecture ablation wanted layer count as well
+as heads, and "incomplete" (missing) features hadn't been tested, only
+noisy ones. GATNodeClassifierNLayer (src/milestone2.py) is a new, additive
+variable-depth model -- verified in tests/test_milestone2.py to be
+architecturally identical to the fixed GATNodeClassifier at n_layers=2, so
+that row is a fresh re-measurement, not reused from the heads ablation.
+`train_gat` gained one new optional `model_factory` parameter (seeded
+identically to the default path) to train it without touching the existing
+2-layer training code.
+
+**Depth ablation -- containment_ratio, n=15:**
+
+| n_layers | GAT threshold | GAT top-k | vs. structural (0.033-0.037) |
+|---|---|---|---|
+| 1 | **0.174+/-0.086** | **0.064+/-0.027** | **both significantly worse (holm_p <=0.0031)** |
+| **2 (baseline)** | 0.053+/-0.016 | 0.035+/-0.006 | threshold sig. worse (holm_p 0.005-0.014); top-k tied (holm_p 0.63-1.0) |
+| 3 | **0.111+/-0.053** | **0.062+/-0.018** | **both significantly worse (holm_p <=0.0002)** |
+
+**This is a sharper, two-sided version of the heads-ablation finding, and
+this time BOTH directions reach significance, not just one.** Depth=2 is a
+genuine, narrow sweet spot: going either shallower (1 layer, containment
+roughly triples for both methods) or deeper (3 layers, roughly doubles) makes
+GAT-based pruning significantly worse than every structural baseline, for
+BOTH GAT threshold and GAT top-k -- unlike the heads ablation, where heads=2's
+degradation didn't survive Holm correction (too much variance at n=15). Here,
+even GAT top-k -- the method that otherwise ties structural baselines at the
+project's actual default architecture -- loses that tie decisively at both
+n_layers=1 and n_layers=3. Combined with the heads finding, this project's
+core "GAT top-k ties structural methods" result now looks like it depends on
+BOTH architecture choices (heads=4 AND n_layers=2) landing in a fairly narrow
+window, not a property that's robust to reasonable architecture variation in
+either dimension. No mechanistic explanation is claimed here beyond the same
+speculative hypothesis noted for the heads ablation (capacity/training-budget
+mismatch) -- confirming it would need dedicated diagnostics this ablation
+pass didn't run.
+
+**Feature-masking ablation -- containment_ratio, n=15 (n_layers=2, heads=4
+throughout; each of risk/hub_score/clustering independently zeroed with
+probability mask_prob, simulating a sensor that stops reporting entirely):**
+
+| mask_prob | GAT threshold | GAT top-k | vs. structural |
+|---|---|---|---|
+| 0.0 (clean) | 0.053+/-0.016 | 0.035+/-0.006 | threshold sig. worse; top-k tied (see above) |
+| 0.1 | 0.063+/-0.051 | 0.039+/-0.018 | neither significant (holm_p 0.24-1.0) |
+| 0.3 | 0.064+/-0.050 | 0.041+/-0.023 | neither significant (holm_p 0.20-0.86) |
+
+**Confirms robustness, same conclusion as the noise ablation.** Point
+estimates drift up slightly for both methods (more so for GAT threshold, whose
+variance also roughly triples) but neither newly gains nor loses significance
+relative to any structural baseline at either mask level -- missing up to 30%
+of these continuous feature values doesn't change which methods are
+statistically distinguishable from which. Combined with the noise-ablation
+result, GAT-based pruning's standing relative to structural methods appears
+genuinely robust to corrupted OR missing input features, at least at the
+levels tested here (noise std up to 0.3, masking probability up to 0.3) --
+this is the more reassuring of this project's two robustness axes.
+
+**Honest combined answer for the write-up:** architecture choice (heads
+AND depth) is where this project's core finding is fragile; input-feature
+quality (noise OR missingness) is where it is robust. The final write-up
+should present these as two genuinely different axes with different
+verdicts, not average them into one vague "robustness" statement -- and
+should state the core containment finding as conditional on the specific
+heads=4/n_layers=2 architecture used throughout Milestones 2-4, with both
+untested directions (shallower/deeper, fewer/more heads) now empirically
+shown to break it.
+
+This completes the two remaining optional ablation gaps; Milestone 4's full
+experiment list (harness, reward ablation, stress tests, heads/noise
+ablation, depth/masking ablation) is now done.
+
 ## 2026-07-11 -- Milestone 4 GAT-heads and noisy-feature ablations RESULTS: heads count is a real, unexplained fragility; feature noise is not (COMPLETES MILESTONE 4's PLANNED EXPERIMENTS)
 
 `demo_milestone4_gat_ablations.py` (15 graphs, containment only -- no RL/

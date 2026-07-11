@@ -5,8 +5,10 @@ import torch
 
 from src.milestone2 import (
     GATNodeClassifier,
+    GATNodeClassifierNLayer,
     build_pyg_data,
     compute_class_weights,
+    extract_degree_corrected_attention_scores_nlayer,
     generate_labeled_graph,
     node_features_to_matrix,
     plot_training_curves,
@@ -62,6 +64,50 @@ class Milestone2Tests(unittest.TestCase):
         grad_norms = [p.grad.norm().item() for p in model.parameters() if p.grad is not None]
         self.assertTrue(any(norm > 0 for norm in grad_norms))
 
+
+    def test_gat_nlayer_forward_pass_shape_and_gradient_flow_across_depths(self):
+        graph, node_features, labels = generate_labeled_graph(n_nodes=30, m=2, n_rollouts=3)
+        data = build_pyg_data(graph, node_features, labels)
+
+        for n_layers in (1, 2, 3):
+            model = GATNodeClassifierNLayer(in_channels=data.num_node_features, n_layers=n_layers)
+            logits = model(data.x, data.edge_index)
+            self.assertEqual(logits.shape, (data.num_nodes, 2))
+
+            loss = torch.nn.functional.cross_entropy(logits, data.y)
+            loss.backward()
+            grad_norms = [p.grad.norm().item() for p in model.parameters() if p.grad is not None]
+            self.assertTrue(any(norm > 0 for norm in grad_norms), f"no gradient flow at n_layers={n_layers}")
+
+    def test_gat_nlayer_n_layers_2_matches_fixed_model_architecture(self):
+        # With n_layers=2 (the default depth used everywhere else in the
+        # project), GATNodeClassifierNLayer should have the same layer count
+        # and parameter shapes as the fixed 2-layer GATNodeClassifier.
+        graph, node_features, labels = generate_labeled_graph(n_nodes=30, m=2, n_rollouts=3)
+        data = build_pyg_data(graph, node_features, labels)
+
+        fixed_model = GATNodeClassifier(in_channels=data.num_node_features)
+        variable_model = GATNodeClassifierNLayer(in_channels=data.num_node_features, n_layers=2)
+
+        self.assertEqual(len(variable_model.layers), 2)
+        fixed_params = [p.shape for p in (fixed_model.gat1, fixed_model.gat2) for p in p.parameters()]
+        variable_params = [p.shape for layer in variable_model.layers for p in layer.parameters()]
+        self.assertEqual(fixed_params, variable_params)
+
+    def test_extract_degree_corrected_attention_scores_nlayer_covers_every_edge(self):
+        graph, node_features, labels = generate_labeled_graph(n_nodes=30, m=2, n_rollouts=3)
+        data = build_pyg_data(graph, node_features, labels)
+        train_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+        train_mask[: data.num_nodes // 2] = True
+
+        model = train_gat(
+            data, train_mask, epochs=5,
+            model_factory=lambda: GATNodeClassifierNLayer(in_channels=data.num_node_features, n_layers=3),
+        )
+        scores = extract_degree_corrected_attention_scores_nlayer(model, data, graph)
+
+        self.assertEqual(len(scores), graph.number_of_edges())
+        self.assertTrue(all(v >= 0.0 for v in scores.values()))
 
     def test_compute_class_weights_mildness_endpoints(self):
         y = torch.tensor([0, 0, 0, 1])  # 3 benign, 1 compromised
