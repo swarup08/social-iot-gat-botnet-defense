@@ -3,6 +3,92 @@
 Running log of findings that need to survive into the final write-up but
 don't belong in code comments or README. Newest entries at the top.
 
+## 2026-07-11 -- Milestone 4 GAT-heads and noisy-feature ablations RESULTS: heads count is a real, unexplained fragility; feature noise is not (COMPLETES MILESTONE 4's PLANNED EXPERIMENTS)
+
+`demo_milestone4_gat_ablations.py` (15 graphs, containment only -- no RL/
+greedy oracle, neither ablation question involves those). Completed in 387s
+(~6.5 min). Scope note stated up front in the script and repeated here: GAT
+depth is hardcoded to 2 layers throughout the codebase (attention-extraction
+assumes it structurally); only heads (2/4/8) was varied, not depth. This
+ablation also only measured containment, not frozen utility/F1, at each
+variant -- a real scope gap if classifier-quality robustness under noise/
+head-count ever needs to be claimed, not just pruning-containment robustness.
+
+**Consistency check against the original 40-graph harness:** this run's
+heads=4 structural-baseline numbers (degree 0.033, betweenness 0.036,
+highest-p_uv 0.037) match the original harness almost exactly despite being
+a different (smaller, 15-graph) sample -- good sign the two runs are
+measuring the same thing.
+
+**Heads ablation -- containment_ratio, n=15:**
+
+| heads | GAT threshold | GAT top-k | vs. structural (0.033-0.037) |
+|---|---|---|---|
+| 2 | 0.085+/-0.086 | 0.049+/-0.041 | not significant either method (holm_p 0.21-0.52) -- variance swamps the signal |
+| **4 (baseline)** | 0.053+/-0.016 | 0.035+/-0.006 | threshold significantly worse (holm_p 0.005-0.014); top-k tied (holm_p 0.63-1.0) |
+| 8 | **0.210+/-0.138** | **0.129+/-0.109** | **both significantly worse, by a large margin (holm_p 0.001-0.012)** |
+
+**heads=8 is a dramatic, striking break, not a small effect.** Both GAT
+threshold and GAT top-k containment roughly quadruple relative to heads=4
+(0.053->0.210, 0.035->0.129) -- worse than EVERY structural baseline by a
+wide margin, and this survives Holm correction cleanly across all 6
+comparisons. heads=2 also degrades in the same direction (worse point
+estimate, much higher variance for both methods) but the variance is large
+enough that none of the heads=2 comparisons reach significance -- directionally
+consistent with heads=8's finding, just underpowered to confirm at n=15.
+
+**Plausible mechanism, stated as a hypothesis, not confirmed:** hidden_channels
+is fixed at 8, so layer-1's concatenated output width scales with heads
+(16-dim at heads=2, 32-dim at heads=4, 64-dim at heads=8) while epochs (300)
+and graph size are held fixed. A wider layer-1 representation with the same
+training budget and the same small input feature space could mean less-converged
+or more fragmented attention patterns -- more heads splitting a modest input
+signal more ways, without a proportionate increase in what there is to
+specialize on. This is speculative; confirming it would need direct inspection
+of per-head attention entropy or training curves at each head count, which
+this "quickly" pass did not do.
+
+**Noisy-feature ablation -- containment_ratio, n=15 (heads=4 throughout,
+Gaussian noise on risk/hub_score/clustering only, clipped [0,1]):**
+
+| noise_std | GAT threshold | GAT top-k | vs. structural |
+|---|---|---|---|
+| 0.0 (clean) | 0.053+/-0.016 | 0.035+/-0.006 | threshold sig. worse; top-k tied (see above) |
+| 0.1 | 0.060+/-0.038 | 0.037+/-0.007 | neither significant (holm_p 0.10-1.0) |
+| 0.3 | 0.059+/-0.044 | 0.037+/-0.010 | neither significant (holm_p 0.25-1.0) |
+
+**Feature noise barely moves either method.** GAT top-k's point estimate is
+essentially unchanged across clean/0.1/0.3 (0.035/0.037/0.037) and stays
+statistically tied with structural methods at every noise level, the same
+relationship as the clean baseline. GAT threshold's point estimate drifts up
+slightly (0.053->0.059-0.060, with more variance) but not enough to newly
+reach or lose significance in either direction. At noise_std=0.3 -- a
+substantial corruption relative to these [0,1]-bounded features -- neither
+GAT-based method's standing relative to structural methods changed
+qualitatively from the clean case.
+
+**Honest answer to "does either change the core finding, or just confirm
+robustness":** the two ablations point in genuinely different directions,
+and both matter for the write-up.
+- **Noisy features: CONFIRMS robustness.** GAT top-k's tie with structural
+  methods, and GAT threshold's underperformance, both hold up under
+  meaningful input corruption. This is a straightforward robustness result.
+- **Heads count: DOES NOT confirm robustness -- it exposes a real, sizeable
+  architecture sensitivity.** The "GAT top-k roughly ties structural
+  methods" finding, reported throughout Milestones 2-4, is specific to the
+  heads=4 architecture actually used everywhere else in this project. It is
+  not a general property of "GAT-based attention pruning" -- doubling heads
+  to 8 breaks the tie dramatically and significantly in the worse direction,
+  and halving to 2 trends the same way (undersampled at n=15, not confirmed
+  significant). The final write-up should state the core containment finding
+  as conditional on this specific, unexplained architecture choice, not as
+  an architecture-independent property of GAT attention -- and should flag
+  the heads=8 collapse as an open question (plausible overparameterization/
+  undertraining hypothesis above) rather than a fully understood result.
+
+This completes Milestone 4's planned experiment list (multi-graph harness,
+reward-weighting ablation, stress tests, GAT-heads/noisy-feature ablations).
+
 ## 2026-07-11 -- Milestone 4 stress tests RESULTS: core finding holds robustly across size/density, BREAKS DOWN under aggressive infection (KEY CONDITIONAL FINDING FOR THE FINAL WRITE-UP)
 
 6-condition stress test (`demo_milestone4_stress_tests.py`, 15 graphs/
@@ -72,8 +158,6 @@ beats learned methods" than the size/density data actually supports.
 
 ## 2026-07-11 -- Milestone 4 reward ablation RESULTS: no weighting closes RL's containment gap; pushing security actively backfires; utility edge is real but only against weaker baselines (KEY FRAMING RESULT FOR THE FINAL WRITE-UP)
 
-## 2026-07-11 -- Milestone 4 reward ablation RESULTS: no weighting closes RL's containment gap; pushing security actively backfires; utility edge is real but only against weaker baselines (KEY FRAMING RESULT FOR THE FINAL WRITE-UP)
-
 40-graph ablation (`demo_milestone4_reward_ablation.py`, design/scope in the
 smoke-test entry directly below) completed in 2820s (47 min). RL baseline's
 containment ratio (0.072+/-0.043) exactly reproduces the original harness
@@ -133,8 +217,6 @@ and not "RL is worse across the board" overstated either.
 
 ## 2026-07-11 -- Milestone 4 reward ablation: aggressive w_security COLLAPSES DQN training (found during smoke-test, before committing 40-graph compute)
 
-## 2026-07-11 -- Milestone 4 reward ablation: aggressive w_security COLLAPSES DQN training (found during smoke-test, before committing 40-graph compute)
-
 While spot-checking planned weight configs before the full 40-graph
 ablation run, found that pushing w_security too high breaks training
 entirely -- converges to choosing STOP at step 0 every time (containment
@@ -172,8 +254,6 @@ WITH utility kept, plus sec=1.0/util=0.0 (utility removed at baseline
 security scale) as its own condition. This directly tests whether the
 40-graph run confirms the collapse generalizes (or is graph-dependent) at
 both ends, rather than running a single confounded extreme condition.
-
-## 2026-07-11 -- Milestone 3 RL environment: utility-metric divergence from Milestone 2, and single-graph scope (both flagged BEFORE training, not discovered after)
 
 ## 2026-07-11 -- Milestone 4 harness RESULTS: 40-graph statistical confirmation -- RL loses to every structural method on containment, and the expensive methods don't earn their compute cost
 

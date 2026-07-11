@@ -243,6 +243,7 @@ def train_gat(
     weight_decay: float = 5e-4,
     val_mask: torch.Tensor = None,
     log_history: bool = False,
+    heads: int = 4,
 ):
     """Train a GATNodeClassifier on `data`, using only `train_mask` for the loss.
 
@@ -285,7 +286,7 @@ def train_gat(
     unaffected and still gets just the trained model back.
     """
     torch.manual_seed(model_seed)  # seeds both weight init and dropout stochasticity
-    model = GATNodeClassifier(in_channels=data.num_node_features)
+    model = GATNodeClassifier(in_channels=data.num_node_features, heads=heads)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     class_weights = compute_class_weights(data.y, train_mask, mildness=weight_mildness) if weight_mildness > 0 else None
 
@@ -368,7 +369,7 @@ def _extract_directed_attention(model: GATNodeClassifier, data: Data) -> torch.T
     assert torch.equal(edge_index_1[:, :n_directed], data.edge_index)
     assert torch.equal(edge_index_2[:, :n_directed], data.edge_index)
 
-    layer1_score = alpha1[:n_directed].mean(dim=1)  # mean over layer 1's 4 heads
+    layer1_score = alpha1[:n_directed].mean(dim=1)  # mean over layer 1's heads (whatever count the model used)
     layer2_score = alpha2[:n_directed].mean(dim=1)  # mean over layer 2's 1 head
     return (layer1_score + layer2_score) / 2.0  # mean over the 2 layers
 
