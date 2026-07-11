@@ -3,6 +3,100 @@
 Running log of findings that need to survive into the final write-up but
 don't belong in code comments or README. Newest entries at the top.
 
+## 2026-07-11 -- Milestone 4 harness RESULTS: 40-graph statistical confirmation -- RL loses to every structural method on containment, and the expensive methods don't earn their compute cost
+
+The 40-graph harness (`demo_milestone4_harness.py`, scope decisions in the
+entry directly below) completed in 2950s (49.2 min -- longer than the
+~35-40 min estimate; graphs 6-31 took ~85-100s each vs. ~30-50s for the
+rest, most plausibly structural variance across BA graph instances
+affecting greedy-oracle search / top-k calibration cost, not a bug).
+
+**Per-method mean +/- std, containment ratio (lower = more contained), n=40:**
+
+| method | containment_ratio | frozen_recall | frozen_f1 | mean time/graph |
+|---|---|---|---|---|
+| RL | 0.072+/-0.043 | 0.511 | 0.543 | 26.44s |
+| GAT threshold | 0.055+/-0.013 | 0.490 | 0.544 | 0.10s |
+| GAT top-k | 0.037+/-0.006 | 0.452 | 0.532 | 0.52s |
+| degree-centrality | 0.033+/-0.006 | 0.462 | 0.562 | 0.01s |
+| betweenness-centrality | 0.036+/-0.006 | 0.363 | 0.455 | 0.44s |
+| highest-p_uv | 0.037+/-0.005 | 0.341 | 0.423 | 0.01s |
+| random | 0.122+/-0.018 | 0.406 | 0.466 | 0.02s |
+| greedy oracle | 0.066+/-0.034 | 0.550 | 0.634 | **41.49s** |
+
+Sanity check passes: random is clearly worst. Shared GAT training:
+3.72s/graph (amortized across GAT threshold, GAT top-k, RL).
+
+**"No structural method dominates" (Milestone 2) -- PARTIALLY OVERTURNED.**
+GAT threshold is now significantly AND substantially worse than GAT top-k
+(diff=0.018, holm_p<0.0001) -- a real finding multi-graph data newly
+supports; single-graph runs had this ranking flip depending on which run.
+Among the remaining cluster (degree-centrality, betweenness, highest-p_uv,
+GAT top-k, all 0.033-0.037), pairwise differences ARE Holm-significant
+(n=40 has power to detect them) but the absolute effect sizes are tiny
+(<=0.004) -- statistically real, practically close to negligible. One pair
+(highest-p_uv vs. betweenness) is genuinely indistinguishable (holm_p=0.91).
+
+**"RL beats random/oracle but not structural methods" (Milestone 3) --
+CONFIRMED AND STRENGTHENED.** RL significantly beats random (diff=-0.050,
+large effect, holm_p<0.0001) and is statistically tied with greedy oracle
+(holm_p=0.91) -- matching the tentative single-graph read exactly. But RL
+is significantly WORSE than all 5 structural methods on containment
+(diffs 0.017-0.039, all holm-significant, moderate-to-large effect sizes,
+not tiny ones) -- this is stronger than "RL doesn't clearly win," it's "RL
+reliably loses" on containment specifically, now with real statistical
+weight behind it (previously this was one graph's worth of evidence).
+
+**The compute-cost finding that matters most: greedy oracle (41.49s/graph)
+is the single most expensive method -- MORE expensive than RL
+(26.44s/graph) -- and does not significantly beat RL on containment.**
+Every structural heuristic (0.01-0.52s/graph, up to ~4000x cheaper) beats
+BOTH expensive methods on containment, significantly. Per this project's
+own standard ("is the expensive method earning its cost"), the honest
+answer for containment specifically is no: neither RL nor the greedy
+oracle currently earns its compute cost over the cheap structural
+heuristics, at this pruning level, on this graph family.
+
+**What this does NOT cover** (see the scope-decisions entry below): frozen
+utility only (RL's actual advantage there -- 2nd-highest recall/F1 in the
+table, behind only greedy oracle -- has NOT been paired-tested here, only
+reported descriptively); Milestone 2's retrained-utility comparison remains
+single-graph and unconfirmed at this scale; single pruning level (50%)
+only, not swept.
+
+## 2026-07-11 -- Milestone 4 multi-graph harness: scope decisions made BEFORE running, not discovered after
+
+## 2026-07-11 -- Milestone 4 multi-graph harness: scope decisions made BEFORE running, not discovered after
+
+Building the 40-graph statistical harness (the foundation for all of
+Milestone 4's ablations/stress-tests). Three compute-driven trade-offs,
+decided and recorded before the harness ran, not rationalized after seeing
+results:
+
+1. **Frozen utility only, not retrained.** Retraining a GAT per method per
+   graph (measure_utility, ~3.6s/call) x 8 methods x 40 graphs is ~19
+   minutes on its own. Frozen utility (measure_utility_frozen, ~1ms/call)
+   is functionally free. **Consequence: Milestone 2's original
+   retrained-utility comparison (e.g. "GAT threshold has the best F1 at
+   50%") remains a single-graph, tentative finding and is NOT re-validated
+   by this harness.** If retrained utility needs multi-graph validation
+   later, that is a separate, additional compute cost, not something this
+   harness's results can be read as covering.
+2. **RL trained for 100 episodes/graph, not 300.** Spot-checked on the
+   standard graph before committing across all 40: both settings converge
+   to the same qualitative "prune to the removal budget cap" behavior
+   (stopped_early=False either way), mean episode return improves
+   substantially under both (100ep: 4.5->10.9; 300ep: 3.9->12.7), and
+   replay-buffer deep-trajectory coverage is comparable (0.160 vs 0.169).
+   300 episodes does reach a somewhat higher final return, as expected --
+   this is a real, acknowledged fidelity/cost trade-off, not a free lunch.
+3. **Single pruning level (50%)**, matching Milestone 3's existing
+   RL-vs-baselines comparison, rather than sweeping multiple levels per
+   graph across all 40 instances.
+
+See the harness results entry (same date, above this one once posted) for
+the actual multi-graph numbers.
+
 ## 2026-07-11 -- Milestone 3 DQN: confirmed reward-driven "always max-prune" policy (sets up Milestone 4's reward-weighting ablation), plus RL vs. static baselines comparison
 
 **Exhausted-bucket action-mask fix.** The trained greedy policy was getting
