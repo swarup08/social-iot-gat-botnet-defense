@@ -5,6 +5,9 @@ import unittest
 import networkx as nx
 
 from src.milestone1 import (
+    DEVICE_TYPES,
+    build_edge_features,
+    build_node_features,
     build_social_iot_graph,
     compute_edge_infection_probabilities,
     plot_degree_distribution,
@@ -66,6 +69,48 @@ class Milestone1Tests(unittest.TestCase):
         # A node-by-node cascade (rather than round-synchronous) would instead
         # spread {1,2} and {3,4} across separate history entries.
         self.assertEqual(result["infection_history"], [1, 3, 5, 5])
+
+    def test_build_node_features_uses_real_structure_and_device_types(self):
+        graph = build_social_iot_graph(n_nodes=40, m=3, seed=5)
+
+        node_features = build_node_features(graph)
+
+        self.assertEqual(set(node_features.keys()), set(graph.nodes()))
+        degree_centrality = nx.degree_centrality(graph)
+        for node, features in node_features.items():
+            # hub_score must be the graph's real degree centrality, not a placeholder.
+            self.assertAlmostEqual(features["hub_score"], degree_centrality[node])
+            self.assertIn(features["device_type"], DEVICE_TYPES)
+            self.assertGreaterEqual(features["risk"], 0.0)
+            self.assertLessEqual(features["risk"], 1.0)
+            self.assertIsInstance(features["community"], int)
+        # All five roadmap device types should appear on a graph this size.
+        self.assertEqual({f["device_type"] for f in node_features.values()}, set(DEVICE_TYPES))
+
+    def test_build_edge_features_uses_real_structure(self):
+        graph = build_social_iot_graph(n_nodes=40, m=3, seed=5)
+
+        edge_features = build_edge_features(graph)
+
+        self.assertEqual(len(edge_features), graph.number_of_edges())
+        for value in edge_features.values():
+            self.assertIn("interaction", value)
+            self.assertGreaterEqual(value["interaction"], 0.0)
+            self.assertLessEqual(value["interaction"], 1.0)
+
+    def test_structural_features_feed_into_infection_probabilities(self):
+        graph = build_social_iot_graph(n_nodes=30, m=2, seed=3)
+        node_features = build_node_features(graph)
+        edge_features = build_edge_features(graph)
+
+        probabilities = compute_edge_infection_probabilities(
+            graph, node_features, edge_features, beta=[-2.0, 1.5, -1.0, 0.8, 0.4, 0.7, 0.3]
+        )
+
+        self.assertEqual(len(probabilities), graph.number_of_edges())
+        for p in probabilities.values():
+            self.assertGreater(p, 0.0)
+            self.assertLess(p, 1.0)
 
     def test_plotting_helpers_save_png_files(self):
         graph = build_social_iot_graph(n_nodes=20, m=2, seed=3)

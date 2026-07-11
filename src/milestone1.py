@@ -32,6 +32,130 @@ def build_social_iot_graph(n_nodes: int = 80, m: int = 3, seed: int = 7) -> nx.G
     return graph
 
 
+# The roadmap describes each node as "a physical IoT device (sensor, actuator,
+# gateway), a user, or a cloud/edge service" -- these are the five categories.
+DEVICE_TYPES = ("sensor", "actuator", "gateway", "user", "service")
+
+# Percentile cutoffs (by degree centrality, ascending) used to assign device
+# types structurally: real Social IoT deployments have a few high-degree
+# gateway hubs, moderately-connected cloud/edge services, mid-degree user
+# devices, and a long tail of low-degree sensor/actuator leaf nodes. This
+# mirrors the Barabási-Albert graph's own power-law degree distribution.
+_GATEWAY_PERCENTILE = 0.90  # top 10% most-connected nodes become gateways
+_SERVICE_PERCENTILE = 0.75  # next 15% become cloud/edge services
+_USER_PERCENTILE = 0.50  # next 25% become user devices
+# the remaining bottom 50% (leaf-like nodes) split into sensors/actuators
+
+# Baseline infection risk per device type (roadmap's "static properties:
+# device type"): cheap, rarely-patched embedded hardware (sensors/actuators)
+# is more vulnerable than centrally-managed gateways or heavily-monitored
+# cloud/edge services; user devices (phones/laptops) sit in between.
+_DEVICE_TYPE_BASE_RISK = {
+    "sensor": 0.55,
+    "actuator": 0.55,
+    "user": 0.45,
+    "gateway": 0.35,
+    "service": 0.30,
+}
+# Weight of the topological (clustering-coefficient) term added on top of the
+# device-type baseline when computing a node's risk feature.
+_CLUSTERING_RISK_WEIGHT = 0.3
+
+
+def assign_device_types(graph: nx.Graph) -> Dict[int, str]:
+    """Assign each node one of the roadmap's device/user/service types.
+
+    Types are derived from degree centrality rather than an arbitrary rule
+    (e.g. node id modulo): the highest-degree nodes become gateways (real
+    gateways aggregate many devices), the next band becomes cloud/edge
+    services, the next becomes user devices, and the low-degree tail -- which
+    has no graph-theoretic signal to distinguish the two -- alternates
+    deterministically between sensor and actuator by node id.
+    """
+    centrality = nx.degree_centrality(graph)  # real per-node degree, normalized to [0, 1]
+    # Sort ascending by degree centrality so percentile cutoffs are simple index math.
+    ranked_nodes = sorted(graph.nodes(), key=lambda node: centrality[node])
+    n_nodes = len(ranked_nodes)
+
+    device_types: Dict[int, str] = {}
+    for rank, node in enumerate(ranked_nodes):
+        # 0.0 = lowest-degree node, 1.0 = highest-degree node.
+        percentile = rank / max(n_nodes - 1, 1)
+        if percentile >= _GATEWAY_PERCENTILE:
+            device_types[node] = "gateway"
+        elif percentile >= _SERVICE_PERCENTILE:
+            device_types[node] = "service"
+        elif percentile >= _USER_PERCENTILE:
+            device_types[node] = "user"
+        else:
+            device_types[node] = "sensor" if node % 2 == 0 else "actuator"
+    return device_types
+
+
+def build_node_features(graph: nx.Graph) -> Dict[int, Dict[str, float]]:
+    """Derive per-node features from real graph structure and device type.
+
+    Populates the keys compute_edge_infection_probabilities reads ("risk",
+    "hub_score", "community"), replacing the old node-id-modulo placeholders:
+    - hub_score: degree centrality -- the roadmap's "degree ... centrality
+      scores" topological feature.
+    - risk: a device-type baseline (roadmap's "static properties: device
+      type") plus a clustering-coefficient term (roadmap's "clustering
+      coefficient" topological feature). Lower clustering means a node
+      bridges otherwise-separate neighborhoods (a structural hole), so it
+      contributes more to risk.
+    - community: a real detected community id from modularity maximization,
+      not node % 3.
+    Also attaches "device_type" and "clustering" for realism/reporting, even
+    though the current infection model's feature vector doesn't read them.
+    """
+    device_types = assign_device_types(graph)
+    hub_scores = nx.degree_centrality(graph)  # real degree, normalized to [0, 1]
+    clustering = nx.clustering(graph)  # real local clustering coefficient per node
+
+    # Real community detection (modularity maximization) instead of node % 3.
+    communities = nx.community.greedy_modularity_communities(graph)
+    community_id: Dict[int, int] = {}
+    for community_index, members in enumerate(communities):
+        for node in members:
+            community_id[node] = community_index
+
+    node_features: Dict[int, Dict[str, float]] = {}
+    for node in graph.nodes():
+        device_type = device_types[node]
+        base_risk = _DEVICE_TYPE_BASE_RISK[device_type]
+        structural_risk = _CLUSTERING_RISK_WEIGHT * (1.0 - clustering[node])
+        risk = min(1.0, base_risk + structural_risk)  # clip to keep risk in [0, 1]
+
+        node_features[node] = {
+            "risk": risk,
+            "hub_score": hub_scores[node],
+            "community": community_id[node],
+            "device_type": device_type,
+            "clustering": clustering[node],
+        }
+    return node_features
+
+
+def build_edge_features(graph: nx.Graph) -> Dict[Tuple[int, int], Dict[str, float]]:
+    """Derive per-edge features from real graph structure.
+
+    Populates "interaction" -- the key compute_edge_infection_probabilities
+    reads -- from normalized edge betweenness centrality, replacing the old
+    (u + v) % 5 placeholder: edges that sit on many shortest paths carry more
+    communication traffic between otherwise-distant parts of the network, so
+    higher betweenness is used as a structural proxy for communication
+    frequency/importance. (Checked empirically against Jaccard neighborhood
+    overlap, which is degenerate here -- zero on ~30% of edges on this graph's
+    typical low clustering -- so betweenness was used instead.)
+    """
+    betweenness = nx.edge_betweenness_centrality(graph, normalized=True)
+    edge_features: Dict[Tuple[int, int], Dict[str, float]] = {}
+    for edge, value in betweenness.items():
+        edge_features[edge] = {"interaction": value}
+    return edge_features
+
+
 def _feature_vector(node_features: Dict[int, Dict[str, float]], edge_features: Dict[Tuple[int, int], Dict[str, float]], u: int, v: int) -> List[float]:
     """Create the feature vector phi(x_u, x_v, e_uv) used by the infection model.
 
