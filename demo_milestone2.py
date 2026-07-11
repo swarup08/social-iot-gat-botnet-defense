@@ -28,7 +28,7 @@ import statistics
 import torch
 from scipy import stats
 
-from src.milestone2 import build_pyg_data, generate_labeled_graph, train_gat
+from src.milestone2 import accuracy, build_pyg_data, generate_labeled_graph, precision_recall_f1_counts, train_gat
 
 N_NODES = 300  # sized so ~20% test masks have comfortably double-digit+ compromised nodes
 EPOCHS = 300
@@ -62,10 +62,6 @@ def make_node_split(n_nodes: int, train_frac: float = 0.6, val_frac: float = 0.2
     return train_mask, val_mask, test_mask
 
 
-def accuracy(predictions: torch.Tensor, y: torch.Tensor, mask: torch.Tensor) -> float:
-    return (predictions[mask] == y[mask]).float().mean().item()
-
-
 def majority_baseline_accuracy(y: torch.Tensor, train_mask: torch.Tensor, test_mask: torch.Tensor) -> float:
     """Accuracy of always predicting the majority class -- fit on TRAIN, scored on TEST.
 
@@ -76,34 +72,6 @@ def majority_baseline_accuracy(y: torch.Tensor, train_mask: torch.Tensor, test_m
     majority_class = int(y[train_mask].float().mean().item() >= 0.5)
     predictions = torch.full_like(y, majority_class)
     return accuracy(predictions, y, test_mask)
-
-
-def precision_recall_f1_counts(predictions: torch.Tensor, y: torch.Tensor, mask: torch.Tensor, target_class: int) -> dict:
-    """Precision/recall/F1 AND the raw confusion counts they're built from.
-
-    The raw counts (true_positive / total_positive / predicted_positive)
-    matter on their own: with single-to-low-double-digit positive counts per
-    split, "recall=0.5" could mean "1 of 2" or "10 of 20" -- very different
-    confidence in the number -- so we keep the counts alongside the rates.
-    """
-    predicted = predictions[mask]
-    actual = y[mask]
-    true_positive = int(((predicted == target_class) & (actual == target_class)).sum())
-    false_positive = int(((predicted == target_class) & (actual != target_class)).sum())
-    total_positive = int((actual == target_class).sum())
-    predicted_positive = int((predicted == target_class).sum())
-
-    precision = true_positive / predicted_positive if predicted_positive > 0 else 0.0
-    recall = true_positive / total_positive if total_positive > 0 else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-    return {
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "true_positive": true_positive,
-        "total_positive": total_positive,
-        "predicted_positive": predicted_positive,
-    }
 
 
 def train_one_run(data, train_mask, val_mask, test_mask, model_seed: int, weight_mildness: float) -> dict:

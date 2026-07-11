@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Tuple
 
+import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import torch
@@ -163,6 +164,37 @@ class GATNodeClassifier(nn.Module):
         return x  # raw logits; combine with CrossEntropyLoss / softmax outside
 
 
+def accuracy(predictions: torch.Tensor, y: torch.Tensor, mask: torch.Tensor) -> float:
+    return (predictions[mask] == y[mask]).float().mean().item()
+
+
+def precision_recall_f1_counts(predictions: torch.Tensor, y: torch.Tensor, mask: torch.Tensor, target_class: int) -> Dict[str, float]:
+    """Precision/recall/F1 AND the raw confusion counts they're built from.
+
+    The raw counts (true_positive / total_positive / predicted_positive)
+    matter on their own: with single-to-low-double-digit positive counts per
+    split, "recall=0.5" could mean "1 of 2" or "10 of 20" -- very different
+    confidence in the number -- so we keep the counts alongside the rates.
+    """
+    predicted = predictions[mask]
+    actual = y[mask]
+    true_positive = int(((predicted == target_class) & (actual == target_class)).sum())
+    total_positive = int((actual == target_class).sum())
+    predicted_positive = int((predicted == target_class).sum())
+
+    precision = true_positive / predicted_positive if predicted_positive > 0 else 0.0
+    recall = true_positive / total_positive if total_positive > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    return {
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "true_positive": true_positive,
+        "total_positive": total_positive,
+        "predicted_positive": predicted_positive,
+    }
+
+
 def compute_class_weights(y: torch.Tensor, mask: torch.Tensor, n_classes: int = 2, mildness: float = 1.0) -> torch.Tensor:
     """Per-class loss weights, interpolated between unweighted and fully balanced.
 
@@ -239,3 +271,160 @@ def train_gat(
 
     model.eval()
     return model
+
+
+def _extract_directed_attention(model: GATNodeClassifier, data: Data) -> torch.Tensor:
+    """Extract per-directed-edge attention, averaged over heads and the 2 layers.
+
+    GATConv.forward() normally returns only updated node features -- the
+    attention coefficients it computes internally are discarded. Passing
+    return_attention_weights=True makes it ADDITIONALLY return
+    (edge_index_used, alpha), where alpha has shape [num_edges_used, heads]
+    and alpha[k, h] is exactly the softmax-normalized attention coefficient
+    (the alpha_ij from the GAT paper, i = target, j = source) head h assigns
+    to the k-th (source, target) pair in edge_index_used. edge_index_used is
+    LONGER than the edge_index we pass in, because GATConv adds a self-loop
+    (i, i) for every node by default (add_self_loops=True) before computing
+    attention -- so we can't reuse our input edge_index to index alpha
+    without accounting for that, and instead check (assert) that GATConv
+    preserves our original edges, in order, at the front of edge_index_used
+    before slicing them out.
+
+    Returns a 1-D tensor of length data.edge_index.shape[1] (one score per
+    INPUT directed edge, in the same order as data.edge_index, self-loops
+    already excluded): the mean over heads within each layer, then the mean
+    of the two layers together, per the roadmap's "average ... over heads and
+    layers." Callers combine directions (u->v and v->u) themselves, since raw
+    vs. degree-corrected aggregation need that split differently.
+    """
+    model.eval()
+    n_directed = data.edge_index.shape[1]  # == 2 * n_undirected_edges, by build_pyg_data's construction
+
+    with torch.no_grad():
+        # Replicates GATNodeClassifier.forward() exactly (dropout is a no-op in
+        # eval mode), but requesting attention weights at each layer.
+        hidden, (edge_index_1, alpha1) = model.gat1(data.x, data.edge_index, return_attention_weights=True)
+        hidden = F.elu(hidden)
+        _, (edge_index_2, alpha2) = model.gat2(hidden, data.edge_index, return_attention_weights=True)
+
+    # We rely on GATConv preserving our input edge order at the FRONT of its
+    # returned edge_index and appending self-loops after; verify that instead
+    # of silently trusting an internal-implementation assumption.
+    assert torch.equal(edge_index_1[:, :n_directed], data.edge_index)
+    assert torch.equal(edge_index_2[:, :n_directed], data.edge_index)
+
+    layer1_score = alpha1[:n_directed].mean(dim=1)  # mean over layer 1's 4 heads
+    layer2_score = alpha2[:n_directed].mean(dim=1)  # mean over layer 2's 1 head
+    return (layer1_score + layer2_score) / 2.0  # mean over the 2 layers
+
+
+def extract_edge_attention_scores(model: GATNodeClassifier, data: Data) -> Dict[Tuple[int, int], float]:
+    """Extract one RAW attention-based importance score s_uv per undirected edge.
+
+    Averages the two directions (u->v and v->u) of each undirected edge
+    together, since GAT attention is directional (softmax is taken over each
+    TARGET node's own neighborhood) but our graph and downstream pruning are
+    undirected.
+
+    CAVEAT (see NOTES.md): this raw score is confounded by degree -- softmax
+    normalization mechanically hands a smaller average share to each neighbor
+    of a high-degree (hub) node, regardless of how "important" that neighbor
+    actually is, which shows up empirically as a strong NEGATIVE correlation
+    between s_uv and hub_score/betweenness/p_uv. Use
+    extract_degree_corrected_attention_scores for pruning decisions instead.
+    """
+    directed_score = _extract_directed_attention(model, data)
+    n_edges = data.edge_index.shape[1] // 2
+
+    # build_pyg_data lays out edge_index as [forward edges (u_i -> v_i) for all
+    # i][backward edges (v_i -> u_i) for all i], so these two halves line up
+    # positionally with each other and with graph.edges() order.
+    forward_score = directed_score[:n_edges]  # v_i attending to u_i
+    backward_score = directed_score[n_edges : 2 * n_edges]  # u_i attending to v_i
+
+    edges = list(zip(data.edge_index[0, :n_edges].tolist(), data.edge_index[1, :n_edges].tolist()))
+    return {(u, v): float((forward_score[i] + backward_score[i]) / 2.0) for i, (u, v) in enumerate(edges)}
+
+
+def extract_degree_corrected_attention_scores(model: GATNodeClassifier, data: Data, graph: nx.Graph) -> Dict[Tuple[int, int], float]:
+    """Extract a degree-corrected attention score s_uv per undirected edge.
+
+    For a directed edge (source=j, target=i), alpha_ij is normalized by
+    softmax over ALL of i's neighbors (i.e. sum_j alpha_ij = 1 across
+    deg(i)-ish terms) -- so a high-degree target mechanically hands out a
+    smaller average share to each neighbor, independent of whether that
+    neighbor's raw (pre-softmax) signal was actually strong. Multiplying
+    alpha_ij by deg(i) -- the size of i's neighborhood -- cancels that
+    mechanical dilution: the result is ~1 if j gets exactly a uniform share
+    of i's attention, >1 if j is favored above uniform, <1 if disfavored.
+    That's the model's learned RELATIVE preference, with the "more competing
+    neighbors -> smaller raw share" artifact removed.
+
+    (This uses the graph's real degree, not degree+1, so it slightly
+    under-corrects relative to GATConv's actual softmax denominator, which
+    also includes the self-loop it adds internally -- a minor approximation,
+    not expected to change the qualitative correlation picture.)
+
+    The two directions of each undirected edge are corrected independently
+    (by their own target's degree) before being averaged together, since
+    u->v and v->u are diluted by different nodes' neighborhood sizes.
+    """
+    directed_score = _extract_directed_attention(model, data)
+    n_edges = data.edge_index.shape[1] // 2
+    degree = dict(graph.degree())
+
+    targets = data.edge_index[1, : 2 * n_edges].tolist()
+    corrected = torch.tensor([directed_score[i].item() * degree[target] for i, target in enumerate(targets)])
+
+    forward_score = corrected[:n_edges]  # (v_i attending to u_i) * deg(v_i)
+    backward_score = corrected[n_edges : 2 * n_edges]  # (u_i attending to v_i) * deg(u_i)
+
+    edges = list(zip(data.edge_index[0, :n_edges].tolist(), data.edge_index[1, :n_edges].tolist()))
+    return {(u, v): float((forward_score[i] + backward_score[i]) / 2.0) for i, (u, v) in enumerate(edges)}
+
+
+def align_edge_metrics(scores: Dict[Tuple[int, int], float], metric: Dict[Tuple[int, int], float]) -> Tuple[np.ndarray, np.ndarray]:
+    """Pair up two per-edge dicts into aligned arrays for correlation/plotting.
+
+    `metric` may key an edge as either (u, v) or (v, u) -- Milestone 1's
+    feature dicts and this module's attention scores aren't guaranteed to
+    agree on direction for a given undirected edge, so both are checked.
+    """
+    s_values, m_values = [], []
+    for (u, v), s in scores.items():
+        m = metric.get((u, v), metric.get((v, u)))
+        s_values.append(s)
+        m_values.append(m)
+    return np.array(s_values, dtype=np.float64), np.array(m_values, dtype=np.float64)
+
+
+def plot_attention_score_distribution(scores: Dict[Tuple[int, int], float], output_path: str = "attention_score_distribution.png") -> str:
+    """Histogram of the aggregated attention score s_uv across all edges."""
+    values = list(scores.values())
+
+    plt.figure(figsize=(6, 4))
+    plt.hist(values, bins=30, color="steelblue", edgecolor="black")
+    plt.xlabel("attention-based edge importance score s_uv")
+    plt.ylabel("count")
+    plt.title("Distribution of GAT attention edge scores")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    return output_path
+
+
+def plot_attention_vs_metric(s_values: np.ndarray, metric_values: np.ndarray, metric_name: str, output_path: str) -> str:
+    """Scatter s_uv against another per-edge metric, with Pearson r in the title."""
+    pearson_r = float(np.corrcoef(s_values, metric_values)[0, 1])
+
+    plt.figure(figsize=(6, 4))
+    plt.scatter(metric_values, s_values, alpha=0.5, color="steelblue", s=18, edgecolor="none")
+    plt.xlabel(metric_name)
+    plt.ylabel("attention score s_uv")
+    plt.title(f"s_uv vs {metric_name} (Pearson r={pearson_r:.3f})")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    return output_path
