@@ -1,3 +1,6 @@
 numpy
 networkx
 matplotlib
+torch
+torch-geometric
+scipy
