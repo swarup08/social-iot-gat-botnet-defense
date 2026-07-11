@@ -127,28 +127,48 @@ def simulate_botnet(
     initial_compromised: set[int],
     seed: int = 7,
 ) -> Dict[str, object]:
-    """Simulate a simple botnet outbreak over the graph.
+    """Simulate a synchronous, discrete-time botnet outbreak over the graph.
 
-    The infection spreads from an initial compromised seed to neighbors with the
-    edge-specific probability stored in edge_probabilities. The function returns
-    the infected set and a history of infection sizes over time.
+    Implements the roadmap's z_v(t) notion of discrete time steps: at each round
+    t, every node infected as of round t-1 (the current "frontier") independently
+    attempts to infect each of its still-uninfected neighbors via that edge's
+    p_uv. All of a round's Bernoulli trials are checked against the infected set
+    as it stood at the START of the round, so simultaneous infections from
+    different frontier nodes land in the SAME history entry instead of being
+    spread across several node-by-node entries. This makes infection_history
+    track genuine discrete time steps (comparable across graphs/methods), and
+    gives Milestone 3's RL agent a natural point to prune edges between rounds.
     """
     rng = random.Random(seed)
     infected_nodes = set(initial_compromised)
     infection_history: List[int] = [len(infected_nodes)]
 
-    frontier = list(initial_compromised)
+    # `frontier` holds only the nodes infected in the PREVIOUS round; only they
+    # attempt new infections this round. Already-infected nodes from earlier
+    # rounds never re-attempt, since each edge is tried exactly once, at the
+    # round when its infected endpoint first joins the frontier.
+    frontier = set(initial_compromised)
     while frontier:
-        current = frontier.pop()
-        for neighbor in graph.neighbors(current):
-            if neighbor in infected_nodes:
-                continue
-            edge_key = (current, neighbor) if (current, neighbor) in edge_probabilities else (neighbor, current)
-            p_uv = edge_probabilities[edge_key]
-            if rng.random() < p_uv:
-                infected_nodes.add(neighbor)
-                frontier.append(neighbor)
+        next_frontier: set[int] = set()  # nodes newly infected THIS round
+        # Sort for a deterministic RNG draw order, so a fixed seed always
+        # reproduces the same rollout regardless of Python's set iteration order.
+        for current in sorted(frontier):
+            for neighbor in graph.neighbors(current):
+                # Compare against infected_nodes (start-of-round state), not
+                # next_frontier, so every incoming edge still gets its own
+                # independent Bernoulli trial even if another frontier node
+                # already recruited this neighbor earlier in the same round.
+                if neighbor in infected_nodes:
+                    continue
+                edge_key = (current, neighbor) if (current, neighbor) in edge_probabilities else (neighbor, current)
+                p_uv = edge_probabilities[edge_key]
+                if rng.random() < p_uv:
+                    next_frontier.add(neighbor)
+        # Commit the whole round's newly-infected nodes at once, so they land
+        # together in a single infection_history entry (one real time step).
+        infected_nodes.update(next_frontier)
         infection_history.append(len(infected_nodes))
+        frontier = next_frontier
 
     return {
         "infected_nodes": infected_nodes,

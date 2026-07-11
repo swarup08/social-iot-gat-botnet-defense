@@ -44,6 +44,29 @@ class Milestone1Tests(unittest.TestCase):
         self.assertEqual(result["infected_nodes"], {0})
         self.assertEqual(result["infection_history"][0], 1)
 
+    def test_simulate_botnet_batches_simultaneous_infections_into_one_round(self):
+        # A small branching graph: seed 0 has two children (1, 2), each of which
+        # has one further child (3, 4). Round 1 should infect {1, 2} together,
+        # and round 2 should infect {3, 4} together, if simulate_botnet is truly
+        # synchronous rather than processing one node at a time.
+        graph = nx.Graph()
+        graph.add_edges_from([(0, 1), (0, 2), (1, 3), (2, 4)])
+        node_features = {node: {"risk": 0.0, "hub_score": 0.0, "community": 0} for node in graph.nodes}
+        edge_features = {(u, v): {"interaction": 0.0} for u, v in graph.edges}
+        # A large bias with all other weights zeroed drives every p_uv to
+        # sigmoid(50), which rounds to exactly 1.0 in float64 -- so every
+        # edge trial is guaranteed to succeed and the rollout is deterministic.
+        probabilities = compute_edge_infection_probabilities(graph, node_features, edge_features, beta=[50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+        result = simulate_botnet(graph, probabilities, initial_compromised={0}, seed=1)
+
+        self.assertEqual(result["infected_nodes"], {0, 1, 2, 3, 4})
+        # Round 0: seed only (1). Round 1: +{1,2} together (3). Round 2: +{3,4}
+        # together (5). Round 3: no new neighbors left, frontier empties (5).
+        # A node-by-node cascade (rather than round-synchronous) would instead
+        # spread {1,2} and {3,4} across separate history entries.
+        self.assertEqual(result["infection_history"], [1, 3, 5, 5])
+
     def test_plotting_helpers_save_png_files(self):
         graph = build_social_iot_graph(n_nodes=20, m=2, seed=3)
         with tempfile.TemporaryDirectory() as temp_dir:
