@@ -3,6 +3,178 @@
 Running log of findings that need to survive into the final write-up but
 don't belong in code comments or README. Newest entries at the top.
 
+## 2026-07-11 -- Milestone 4 stress tests RESULTS: core finding holds robustly across size/density, BREAKS DOWN under aggressive infection (KEY CONDITIONAL FINDING FOR THE FINAL WRITE-UP)
+
+6-condition stress test (`demo_milestone4_stress_tests.py`, 15 graphs/
+condition -- reduced from the main harness's 40, lower statistical power,
+reported honestly as such throughout). Reused the existing n=300/m=3/
+default-beta 40-graph data as the baseline reference (RL 0.072+/-0.043 vs.
+structural 0.033-0.055, RL significantly worse than all 5). Scope trims:
+alternate RL reward weights and the greedy oracle dropped from all 6 new
+conditions (too expensive to scale x6; not central to this question).
+
+**Size and density: core finding HOLDS, and strengthens.**
+
+| condition | RL containment | structural range | RL significantly worse vs. |
+|---|---|---|---|
+| size=150 | 0.126+/-0.068 | 0.057-0.092 | 4/5 (all but GAT threshold, p=0.11) |
+| size=600 | 0.051+/-0.037 | 0.019-0.032 | 4/5 (all but GAT threshold, p=0.07) |
+| density sparse (m=2) | **0.570+/-0.396** | 0.142-0.181 | **5/5, dramatically** (diff 0.39-0.43) |
+| density dense (m=5) | 0.243+/-0.087 | 0.042-0.132 | 5/5 |
+
+Sparse graphs are the most dramatic gap seen anywhere in this project --
+RL's huge variance there (+/-0.396) echoes the SAME training-instability
+signature seen in the reward-weighting ablation (aggressive w_security
+collapsing to near-zero pruning): this looks like RL/DQN training itself
+becomes fragile on sparse graphs (fewer edges = less room for the
+bucket-based action space to work with?), not just a modest underperformance.
+Worth investigating further if pursuing RL as a serious approach -- this is
+a second, independent condition (sparsity, not just reward scale) that
+triggers the same fragility pattern.
+
+**Aggressiveness: core finding WEAKENS and PARTIALLY REVERSES.**
+
+| condition | RL vs GAT threshold | RL vs GAT top-k | RL vs degree | RL vs betweenness | RL vs highest-p_uv |
+|---|---|---|---|---|---|
+| moderate (bias=-1.0) | tied (p=0.47) | tied (p=0.23) | RL worse (p<0.0001) | RL worse (p<0.0001) | RL worse (p<0.0001) |
+| high (bias=0.0) | **RL BETTER (p=0.010)** | RL worse (p=0.010) | RL worse (p=0.008) | tied (p=0.56) | tied (p=0.56) |
+
+At moderate aggressiveness, RL catches up to (ties) both GAT-based methods
+specifically, while still losing clearly to the three non-GAT heuristics.
+At high aggressiveness, RL is significantly BETTER than GAT threshold and
+statistically tied with betweenness and highest-p_uv -- only GAT top-k and
+degree-centrality still clearly beat it. **This is a genuine, real reversal
+for at least one comparison (RL vs. GAT threshold), not just "ties appear."**
+
+**Caveat, stated honestly rather than oversold:** under high aggressiveness,
+EVERY method's containment degrades substantially (0.36-0.63, vs. 0.02-0.13
+in every other condition) and frozen-F1 saturates near 1.0 for ALL methods
+(0.995-0.998) -- the classification task itself becomes near-trivial when
+almost every node ends up infected in the majority-vote labeling. Some of
+the apparent "reversal" may be a ceiling/floor effect (everyone struggles
+comparably against near-unstoppable infection, so the structural methods'
+edge shrinks) rather than RL becoming genuinely more capable at high
+aggressiveness. Both readings are plausible from this data; distinguishing
+them would need finer-grained aggressiveness levels between the default and
+bias=0.0 extreme, which this pass didn't run.
+
+**Overall, honest answer to "is the pattern consistent or condition-
+dependent": CONDITION-DEPENDENT, cleanly split by dimension.** Structural
+heuristics beating RL on containment is a robust, even strengthening
+finding across graph size and density -- NOT an artifact of the one graph
+configuration used throughout Milestones 2-3. But it is NOT a universal law:
+it measurably weakens and partially reverses as the botnet becomes more
+aggressive, specifically for the GAT-based methods. The final write-up
+should state the size/density robustness plainly and present the
+aggressiveness reversal as a real, if partially confounded, boundary
+condition -- not bury it, and not claim more generality for "structural
+beats learned methods" than the size/density data actually supports.
+
+## 2026-07-11 -- Milestone 4 reward ablation RESULTS: no weighting closes RL's containment gap; pushing security actively backfires; utility edge is real but only against weaker baselines (KEY FRAMING RESULT FOR THE FINAL WRITE-UP)
+
+## 2026-07-11 -- Milestone 4 reward ablation RESULTS: no weighting closes RL's containment gap; pushing security actively backfires; utility edge is real but only against weaker baselines (KEY FRAMING RESULT FOR THE FINAL WRITE-UP)
+
+40-graph ablation (`demo_milestone4_reward_ablation.py`, design/scope in the
+smoke-test entry directly below) completed in 2820s (47 min). RL baseline's
+containment ratio (0.072+/-0.043) exactly reproduces the original harness
+run -- good cross-run consistency check, same seeds/procedure.
+
+**Per-method mean +/- std, n=40:**
+
+| method | containment_ratio | frozen_f1 |
+|---|---|---|
+| RL baseline (sec=1, util=1) | 0.072+/-0.043 | 0.543 |
+| RL high-security (sec=3, util=1) | 0.153+/-0.287 | 0.566 |
+| RL very-high-security (sec=10, util=1) | 0.930+/-0.250 | 0.513 |
+| RL security-only (sec=1, util=0) | 0.978+/-0.139 | 0.501 |
+| GAT threshold / top-k / degree / betweenness / highest-p_uv | 0.033-0.055 | 0.423-0.562 |
+| random | 0.122+/-0.018 | 0.466 |
+
+**The single-graph smoke test result was misleading -- exactly the failure
+mode multi-graph testing exists to catch.** On the spot-check graph,
+sec=3.0 looked like a clean win (containment 0.051->0.035, better on both
+axes). At 40-graph scale it is WORSE on average (0.153) with enormous
+variance (+/-0.287) -- helps on some graphs, doesn't on many, sometimes
+collapses. sec=10.0 and security-only (util=0) both confirm the training
+collapse found during smoke-testing generalizes broadly across graphs
+(0.93-0.98, i.e. essentially unpruned).
+
+**Containment gap: does NOT close, and pushing harder backfires.**
+High-security's differences vs. every structural method (diff 0.098-0.120,
+RL worse) do not survive Holm correction (holm_p~0.059, just above 0.05)
+-- the added instability/variance prevents confirming the direction at
+this n, even though it points the same way as baseline's already-confirmed
+underperformance. Very-high-security and security-only are catastrophically
+and SIGNIFICANTLY worse than every structural method (diffs 0.87-0.95,
+holm_p<0.0001 in all 10 comparisons).
+
+**RL's frozen-utility edge: real, but only against the weaker baselines,
+not the strongest ones.** Newly paired-tested (previously only reported
+descriptively): RL baseline significantly beats betweenness-centrality
+(holm_p=0.0060), highest-p_uv (holm_p=0.0001), and random (holm_p=0.0010)
+on frozen F1 -- but is statistically indistinguishable from GAT threshold
+(holm_p=1.0), GAT top-k (holm_p=1.0), and degree-centrality (holm_p=1.0),
+the three strongest utility performers.
+
+**Recommended framing for the final write-up:** RL's containment
+underperformance is NOT a simple reward-tuning problem -- naive attempts to
+push security harder within this training setup actively destabilize
+learning rather than closing the gap, and this destabilization (STOP being
+a low-variance, easy-to-learn terminal-action target vs. noisy bootstrapped
+"continue" targets) generalizes robustly across graphs, not a single-graph
+fluke. RL's genuine, defensible strengths are narrower than "RL wins":
+statistically tied with the (much more expensive) greedy oracle on
+containment, reliably beats random, and has a real but partial utility
+edge over the weaker structural baselines specifically. A write-up that
+says "RL needs a different fix (reward shaping/normalization, a different
+algorithm, or a redesigned action space), not just different weights" is
+the defensible claim here -- not "reward tuning didn't help" understated,
+and not "RL is worse across the board" overstated either.
+
+## 2026-07-11 -- Milestone 4 reward ablation: aggressive w_security COLLAPSES DQN training (found during smoke-test, before committing 40-graph compute)
+
+## 2026-07-11 -- Milestone 4 reward ablation: aggressive w_security COLLAPSES DQN training (found during smoke-test, before committing 40-graph compute)
+
+While spot-checking planned weight configs before the full 40-graph
+ablation run, found that pushing w_security too high breaks training
+entirely -- converges to choosing STOP at step 0 every time (containment
+ratio = 1.000, i.e. literally zero pruning), REGARDLESS of whether
+w_utility is kept:
+
+| config | mean return, first 20 episodes | mean return, last 20 | outcome |
+|---|---|---|---|
+| sec=1.0, util=1.0 (baseline) | ~3.9 | ~12.7 | prunes to budget cap, as established |
+| sec=3.0, util=1.0 | -- | -- | works: containment 0.051->0.035 (better), frozen_f1 0.500->0.737 (also better) |
+| sec=5.0, util=1.0 | -9.1 | -3.9 | COLLAPSES to never pruning |
+| sec=10.0, util=1.0 | -24.8 | -9.0 | COLLAPSES to never pruning |
+| sec=1.0, util=0.0 | -3.25 | -1.0 (exactly, every episode) | COLLAPSES to never pruning |
+
+**Why, mechanistically:** STOP is a terminal action, so its Q-value target
+is just the immediate reward -- no bootstrapping, a fast, low-variance,
+easy-to-learn estimate. "Continue pruning" targets require correctly
+propagating value through a noisier multi-step trajectory, which takes
+longer to converge. Early in training, before those downstream estimates
+are any good, an inflated or unshaped reward magnitude (very high
+w_security, or a reward with the utility term's shaping signal removed)
+makes the immediately-known "safe" STOP value look competitive well before
+the network has learned that continuing is actually better -- so the
+policy collapses onto the easy, low-information option before ever
+discovering the eventually-larger payoff of pruning. This is a DQN
+training-stability failure mode, not evidence that "doing nothing" is
+reward-optimal (mathematically, ~50%-pruned structural-level containment
+SHOULD beat the -1.0 no-pruning reward under this formula).
+
+**Consequence for the ablation design:** dropped the originally-planned
+"extreme security" (sec=10, util=0, a compound/confounded condition) in
+favor of testing the two dimensions separately: sec=3.0 (moderate,
+validated working) and sec=10.0 (aggressive, expected to collapse) both
+WITH utility kept, plus sec=1.0/util=0.0 (utility removed at baseline
+security scale) as its own condition. This directly tests whether the
+40-graph run confirms the collapse generalizes (or is graph-dependent) at
+both ends, rather than running a single confounded extreme condition.
+
+## 2026-07-11 -- Milestone 3 RL environment: utility-metric divergence from Milestone 2, and single-graph scope (both flagged BEFORE training, not discovered after)
+
 ## 2026-07-11 -- Milestone 4 harness RESULTS: 40-graph statistical confirmation -- RL loses to every structural method on containment, and the expensive methods don't earn their compute cost
 
 The 40-graph harness (`demo_milestone4_harness.py`, scope decisions in the
@@ -63,8 +235,6 @@ table, behind only greedy oracle -- has NOT been paired-tested here, only
 reported descriptively); Milestone 2's retrained-utility comparison remains
 single-graph and unconfirmed at this scale; single pruning level (50%)
 only, not swept.
-
-## 2026-07-11 -- Milestone 4 multi-graph harness: scope decisions made BEFORE running, not discovered after
 
 ## 2026-07-11 -- Milestone 4 multi-graph harness: scope decisions made BEFORE running, not discovered after
 
