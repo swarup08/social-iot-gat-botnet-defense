@@ -20,6 +20,7 @@ candidate edge) and is intentionally NOT included in this first increment.
 
 from __future__ import annotations
 
+import csv
 import statistics
 from collections import Counter
 from typing import Dict, List, Tuple
@@ -78,6 +79,49 @@ def most_pruned_device_type_pairs(trajectory_log: List[dict], top_n: int = 5) ->
         pair = tuple(sorted((d["device_type_u"], d["device_type_v"])))
         pair_counts[pair] += 1
     return pair_counts.most_common(top_n)
+
+
+def most_pruned_edge_characteristics(trajectory_log: List[dict]) -> List[Dict]:
+    """The roadmap's "lists of edges most frequently pruned and their typical
+    characteristics" as a flat, savable table: one row per device-type pair
+    (the same grouping most_pruned_device_type_pairs ranks by count), with
+    that pair's pruning count AND its typical (mean) s_uv/p_uv/hub_score
+    attached -- "frequency" and "characteristics" together in one table,
+    ranked most-pruned first, ready to hand to save_table_csv.
+    """
+    groups: Dict[Tuple[str, str], List[dict]] = {}
+    for d in _all_removed_edges(trajectory_log):
+        pair = tuple(sorted((d["device_type_u"], d["device_type_v"])))
+        groups.setdefault(pair, []).append(d)
+
+    rows = []
+    for (type_a, type_b), edges in groups.items():
+        rows.append(
+            {
+                "device_type_pair": f"{type_a}<->{type_b}",
+                "times_pruned": len(edges),
+                "mean_s_uv": statistics.mean(d["s_uv"] for d in edges),
+                "mean_p_uv": statistics.mean(d["p_uv"] for d in edges),
+                "mean_hub_score": statistics.mean((d["hub_score_u"] + d["hub_score_v"]) / 2 for d in edges),
+            }
+        )
+    rows.sort(key=lambda r: r["times_pruned"], reverse=True)
+    return rows
+
+
+def save_table_csv(rows: List[Dict], output_path: str) -> str:
+    """Write a list-of-dicts table (e.g. most_pruned_edge_characteristics's or
+    per_node_pruning_summary's output) to a CSV file, using the first row's
+    keys as the header -- every row produced by this module's table functions
+    shares the same keys. An empty `rows` (nothing was pruned) still writes a
+    file, just with no header/rows, rather than silently skipping the save.
+    """
+    with open(output_path, "w", newline="") as f:
+        if rows:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+    return output_path
 
 
 def per_node_pruning_summary(trajectory_log: List[dict], node_features: Dict, node: int) -> List[Dict]:

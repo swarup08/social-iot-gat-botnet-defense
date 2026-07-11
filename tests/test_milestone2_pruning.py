@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 
 import networkx as nx
@@ -7,6 +9,7 @@ from src.milestone2 import DEFAULT_BETA
 from src.milestone2_pruning import (
     calibrate_topk_for_target_fraction,
     greedy_oracle_prune,
+    plot_utility_vs_pruning_level,
     prune_highest_score,
     prune_lowest_score,
     prune_random,
@@ -98,6 +101,20 @@ class Milestone2PruningTests(unittest.TestCase):
         # The original graph object must be untouched (in-place remove/restore
         # during the search shouldn't leak into the caller's graph).
         self.assertEqual(graph.number_of_edges(), n_original)
+
+    def test_plot_utility_vs_pruning_level_saves_png_file(self):
+        results = [
+            {"method": "GAT threshold", "level": 0.10, "recall": 0.3, "f1": 0.4},
+            {"method": "GAT threshold", "level": 0.50, "recall": 0.2, "f1": 0.3},
+            {"method": "random", "level": 0.10, "recall": 0.5, "f1": 0.5},
+            {"method": "random", "level": 0.50, "recall": 0.4, "f1": 0.45},
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "utility.png")
+            returned_path = plot_utility_vs_pruning_level(results, output_path=output_path)
+
+            self.assertEqual(returned_path, output_path)
+            self.assertTrue(os.path.exists(output_path))
 
 
 if __name__ == "__main__":

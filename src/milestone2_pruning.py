@@ -429,3 +429,51 @@ def plot_containment_ratio_vs_pruning_level(results: List[Dict], output_path: st
     plt.savefig(output_path, dpi=150)
     plt.close()
     return output_path
+
+
+def plot_utility_vs_pruning_level(results: List[Dict], output_path: str = "utility_vs_pruning_level.png") -> str:
+    """Roadmap's required core-task-performance figure: recall and F1 (y, two
+    side-by-side subplots) vs. pruning level (x), one line per method.
+
+    `results` is the same list of dicts plot_containment_ratio_vs_pruning_level
+    consumes -- each needing "method", "level", "recall", "f1" keys, exactly
+    the shape demo_milestone2_pruning.py's results list is already built in.
+    Method identity (color/marker) is assigned the same way as the
+    containment-ratio plot -- first-seen order, fixed, never re-cycled by
+    rank -- so a method keeps the same visual identity across both figures.
+    """
+    methods = []
+    for r in results:
+        if r["method"] not in methods:
+            methods.append(r["method"])
+    colors = plt.cm.tab10.colors
+    markers = ["o", "s", "^", "D", "v", "P", "X"]
+
+    fig, (recall_ax, f1_ax) = plt.subplots(1, 2, figsize=(13, 5.5))
+    for i, method in enumerate(methods):
+        method_results = sorted((r for r in results if r["method"] == method), key=lambda r: r["level"])
+        levels = [r["level"] for r in method_results]
+        recalls = [r["recall"] for r in method_results]
+        f1s = [r["f1"] for r in method_results]
+        style = dict(color=colors[i % len(colors)], marker=markers[i % len(markers)], linewidth=1.8, markersize=6)
+        recall_ax.plot(levels, recalls, label=method, **style)
+        f1_ax.plot(levels, f1s, label=method, **style)
+
+    recall_ax.set_xlabel("fraction of edges removed (pruning level)")
+    recall_ax.set_ylabel("recall (compromised class)")
+    recall_ax.set_title("Recall vs. pruning level")
+    recall_ax.set_ylim(0, 1)
+    recall_ax.grid(True, alpha=0.3)
+
+    f1_ax.set_xlabel("fraction of edges removed (pruning level)")
+    f1_ax.set_ylabel("F1 (compromised class)")
+    f1_ax.set_title("F1 vs. pruning level")
+    f1_ax.set_ylim(0, 1)
+    f1_ax.grid(True, alpha=0.3)
+    f1_ax.legend(fontsize=8, loc="upper right")
+
+    fig.suptitle("Core task performance vs. pruning level")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    return output_path

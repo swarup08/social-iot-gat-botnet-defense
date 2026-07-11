@@ -58,6 +58,7 @@ from src.milestone2_pruning import (
     measure_utility,
     pick_seed_nodes,
     plot_containment_ratio_vs_pruning_level,
+    plot_utility_vs_pruning_level,
     prune_highest_score,
     prune_lowest_score,
     prune_random,
@@ -204,6 +205,9 @@ def main() -> None:
 
     plot_path = plot_containment_ratio_vs_pruning_level(results)
     print(f"\nsaved trade-off plot to {plot_path}")
+
+    utility_plot_path = plot_utility_vs_pruning_level(results)
+    print(f"saved core-task-performance (recall/F1 vs. pruning level) plot to {utility_plot_path}")
 
 
 if __name__ == "__main__":

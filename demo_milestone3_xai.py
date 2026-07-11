@@ -4,12 +4,19 @@ Trains the DQN (same setup as demo_milestone3_dqn.py), runs the final
 greedy policy, and generates the roadmap's "simple explanation artifacts"
 from its trajectory_log: aggregate pruned-edge characteristics, most
 frequently pruned device-type pairs, and a per-node summary for a couple of
-representative nodes.
+representative nodes. The device-type-pair characteristics table and the
+hub node's per-node summary are also saved as persistent CSV files (not just
+printed to console), since these are meant to be reusable report artifacts.
 """
 
 from src.milestone3 import build_pruning_env
 from src.milestone3_dqn import run_greedy_episode, train_dqn
-from src.milestone3_xai import format_explanation_report, per_node_pruning_summary
+from src.milestone3_xai import (
+    format_explanation_report,
+    most_pruned_edge_characteristics,
+    per_node_pruning_summary,
+    save_table_csv,
+)
 
 
 def main() -> None:
@@ -20,6 +27,10 @@ def main() -> None:
     trajectory_log = env.trajectory_log
 
     print("\n" + format_explanation_report(trajectory_log, env.original_graph, env.gat_scores, env.p_uv))
+
+    edge_table = most_pruned_edge_characteristics(trajectory_log)
+    edge_table_path = save_table_csv(edge_table, "pruned_edge_characteristics.csv")
+    print(f"\nsaved most-frequently-pruned-edges characteristics table to {edge_table_path} ({len(edge_table)} device-type-pair rows)")
 
     print("\n\nper-node summaries for the hub and mid-degree seed nodes:")
     for role in ("hub", "mid"):
@@ -33,6 +44,9 @@ def main() -> None:
                 f"    removed edge to neighbor {e['neighbor']} ({e['neighbor_device_type']}, "
                 f"hub_score={e['neighbor_hub_score']:.3f}): s_uv={e['s_uv']:.3f}  p_uv={e['p_uv']:.3f}"
             )
+        if role == "hub":
+            hub_summary_path = save_table_csv(entries, "hub_node_pruning_summary.csv")
+            print(f"    saved hub per-node pruning summary to {hub_summary_path} ({len(entries)} rows)")
 
 
 if __name__ == "__main__":
