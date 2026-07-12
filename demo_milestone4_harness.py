@@ -42,6 +42,7 @@ from src.milestone2_pruning import (
 )
 from src.milestone3 import PruningEnv
 from src.milestone3_dqn import run_greedy_episode, train_dqn
+from src.milestone3_xai import save_table_csv
 from src.milestone4 import run_paired_tests_with_correction
 
 N_GRAPHS = 40
@@ -195,6 +196,7 @@ def main() -> None:
 
     print("\n=== per-method mean +/- std across 40 graphs ===")
     print(f"{'method':<24}{'containment_ratio':>20}{'frozen_recall':>16}{'frozen_f1':>12}{'mean_time_s':>13}")
+    summary_rows = []
     for method in METHODS:
         c = all_results[method]["containment_ratio"]
         r = all_results[method]["frozen_recall"]
@@ -204,7 +206,21 @@ def main() -> None:
             f"{method:<24}{statistics.mean(c):>10.3f}+/-{statistics.stdev(c):.3f}"
             f"{statistics.mean(r):>16.3f}{statistics.mean(f):>12.3f}{statistics.mean(t):>13.2f}"
         )
+        summary_rows.append(
+            {
+                "method": method,
+                "containment_ratio_mean": statistics.mean(c),
+                "containment_ratio_std": statistics.stdev(c),
+                "frozen_recall_mean": statistics.mean(r),
+                "frozen_f1_mean": statistics.mean(f),
+                "mean_time_s": statistics.mean(t),
+                "n_graphs": len(c),
+            }
+        )
     print(f"\nshared GAT training time: {statistics.mean(gat_train_times):.2f}s/graph average (amortized across GAT threshold, GAT top-k, and RL)")
+
+    summary_path = save_table_csv(summary_rows, "harness_summary.csv")
+    print(f"saved per-method summary table to {summary_path}")
 
     print(f"\n=== {len(PAIRS)} curated paired significance tests, Holm-corrected (alpha=0.05) ===")
     comparisons = run_paired_tests_with_correction(PAIRS, {m: all_results[m]["containment_ratio"] for m in METHODS})
@@ -215,6 +231,24 @@ def main() -> None:
             f"{label:<45}{c['mean_a']:>8.3f}{c['mean_b']:>8.3f}{c['mean_diff']:>8.3f}"
             f"{c['p_value']:>10.4f}{c['p_value_holm']:>10.4f}{str(c['significant_holm']):>6}"
         )
+
+    paired_rows = [
+        {
+            "method_a": c["method_a"],
+            "method_b": c["method_b"],
+            "mean_a": c["mean_a"],
+            "mean_b": c["mean_b"],
+            "mean_diff": c["mean_diff"],
+            "t_stat": c["t_stat"],
+            "p_value": c["p_value"],
+            "n": c["n"],
+            "holm_corrected_pvalue": c["p_value_holm"],
+            "significant_holm": c["significant_holm"],
+        }
+        for c in comparisons
+    ]
+    paired_path = save_table_csv(paired_rows, "harness_paired_tests.csv")
+    print(f"saved paired significance test table to {paired_path}")
 
     print(
         "\nNo further interpretation forced here -- see NOTES.md for the read-through "
