@@ -160,13 +160,23 @@ python -m unittest discover -s tests -v
 Edge pruning generally slows botnet spread while preserving core-task
 performance -- that part works. But across 40 independent graph
 instances, with paired significance tests and Holm-Bonferroni
-correction: **GAT+RL does not beat simple structural heuristics
-(degree-centrality, highest-p_uv) on containment.** It ties or loses,
-at far higher compute cost (RL: ~33s/graph vs. ~0.007-0.55s/graph for the
-structural heuristics). RL does reliably beat random pruning and tie a
-greedy simulation oracle. Ablations further show this containment
-finding is conditional on the specific GAT architecture used (heads=4,
-depth=2) -- shallower, deeper, or wider architectures break it.
+correction, the honest headline is stronger and simpler: **on this
+problem, simple structural pruning wins outright.** RL loses
+significantly to every one of GAT-threshold, GAT-top-k,
+degree-centrality, betweenness-centrality, and highest-p_uv (all
+Holm-corrected p<0.05) -- it only beats random and ties a greedy
+simulation-guided search. Degree-centrality is both the best method on
+containment and, at 0.0086s/graph vs. RL's 32.6s/graph, roughly
+**3800x cheaper**. It also holds the best security-utility balance
+(frozen F1 ~0.56, second only to the greedy heuristic's 0.63, well
+above highest-p_uv's or betweenness's ~0.42-0.46). Even the greedy
+simulation-guided heuristic -- which looks directly at simulated
+infection outcomes -- does not beat degree-centrality, suggesting
+containment on these graphs is structure-dominated, not just a matter
+of noisy search. Ablations further show the GAT+RL pipeline's
+containment finding is conditional on the specific architecture used
+(heads=4, depth=2) -- shallower, deeper, or wider architectures break
+it.
 
 Full numbers, every caveat, and the dated record of how each finding
 was reached (including two methodological bugs found and fixed
