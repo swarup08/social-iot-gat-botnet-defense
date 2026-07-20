@@ -99,11 +99,11 @@ def main() -> None:
         "random": [prune_random(env.original_graph, TARGET_LEVEL, seed=1000 * i + 7) for i in range(N_RANDOM_REPEATS)],
     }
 
-    print("running greedy oracle search to the 50% checkpoint (~25-30s)...")
+    print("running greedy simulation-guided heuristic search to the 50% checkpoint (~25-30s)...")
     greedy_checkpoints = greedy_oracle_prune(
         env.original_graph, env.p_uv, env.seed_nodes, max_remove_fraction=TARGET_LEVEL, checkpoint_fractions=[TARGET_LEVEL], search_rollouts=1
     )
-    pruned_by_method["greedy oracle"] = [greedy_checkpoints[TARGET_LEVEL]]
+    pruned_by_method["greedy simulation-guided heuristic"] = [greedy_checkpoints[TARGET_LEVEL]]
 
     print("\nmeasuring containment ratio + BOTH utility definitions for every method...")
     results = []

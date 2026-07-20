@@ -13,7 +13,7 @@ as the baseline reference (not rerun):
 Scope trims for tractability (smoke-tested first, see NOTES.md): the 3
 alternate RL reward-weight configs are dropped (already answered -- pushing
 weights doesn't close the gap, see the reward-ablation entry) and the
-greedy oracle is dropped (too expensive to scale across 6 conditions and
+greedy simulation-guided heuristic is dropped (too expensive to scale across 6 conditions and
 not central to the core "structural vs. GAT/RL" question). 15 graphs/
 condition (not 40) -- lower statistical power than the main harness,
 reported honestly as such.

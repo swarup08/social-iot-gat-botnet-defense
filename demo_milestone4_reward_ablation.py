@@ -10,11 +10,11 @@ data to disk, so nothing here can be answered by re-reading old output):
      configs (high security, security-only, extreme security) x the 5
      structural methods (not random -- that comparison isn't in question).
   2. Is RL's frozen-utility edge (2nd-best in the original harness, behind
-     only the greedy oracle) statistically real, or within noise? Tested
-     via the ORIGINAL (baseline-weight) RL policy vs. each of the 6
-     cheap-to-recompute methods, on frozen_f1.
+     only the greedy simulation-guided heuristic) statistically real, or
+     within noise? Tested via the ORIGINAL (baseline-weight) RL policy vs.
+     each of the 6 cheap-to-recompute methods, on frozen_f1.
 
-Scope trim: the greedy oracle (41.49s/graph, the single most expensive
+Scope trim: the greedy simulation-guided heuristic (41.49s/graph, the single most expensive
 method in the original harness) is NOT recomputed here -- neither question
 needs it, and re-deriving it would add ~27 minutes for no analytical
 benefit. The other 6 static/GAT methods ARE recomputed fresh (cheap, and

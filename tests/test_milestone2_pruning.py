@@ -9,6 +9,7 @@ from src.milestone2 import DEFAULT_BETA
 from src.milestone2_pruning import (
     calibrate_topk_for_target_fraction,
     greedy_oracle_prune,
+    plot_containment_vs_utility_tradeoff,
     plot_utility_vs_pruning_level,
     prune_highest_score,
     prune_lowest_score,
@@ -112,6 +113,19 @@ class Milestone2PruningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = os.path.join(temp_dir, "utility.png")
             returned_path = plot_utility_vs_pruning_level(results, output_path=output_path)
+
+            self.assertEqual(returned_path, output_path)
+            self.assertTrue(os.path.exists(output_path))
+
+    def test_plot_containment_vs_utility_tradeoff_saves_png_file(self):
+        rows = [
+            {"method": "degree-centrality", "containment_ratio_mean": 0.033, "frozen_f1_mean": 0.56, "mean_time_s": 0.01},
+            {"method": "random", "containment_ratio_mean": 0.122, "frozen_f1_mean": 0.47, "mean_time_s": 0.02},
+            {"method": "greedy simulation-guided heuristic", "containment_ratio_mean": 0.066, "frozen_f1_mean": 0.63, "mean_time_s": 51.99},
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "tradeoff.png")
+            returned_path = plot_containment_vs_utility_tradeoff(rows, output_path=output_path)
 
             self.assertEqual(returned_path, output_path)
             self.assertTrue(os.path.exists(output_path))

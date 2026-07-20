@@ -3,6 +3,47 @@
 Running log of findings that need to survive into the final write-up but
 don't belong in code comments or README. Newest entries at the top.
 
+## 2026-07-11 -- "greedy oracle" renamed to "greedy simulation-guided heuristic" (supervisor-requested relabel, no rerun)
+
+Per supervisor review of the harness results: renamed the "greedy oracle"
+label to "greedy simulation-guided heuristic" everywhere it appears as a
+display string -- METHODS lists, CSV method-name values (harness_summary.csv,
+harness_paired_tests.csv), plot legends/labels, README, and forward-looking
+docstring prose in the demo scripts. This is a pure relabeling: no experiment
+was rerun, and the underlying numbers are unchanged (verified by diffing the
+CSVs -- only the "greedy oracle" string values changed, nothing numeric). The
+`greedy_oracle_prune` Python function/variable names in src/milestone2_pruning.py
+are left as-is (internal identifiers, not the display label a reviewer reads);
+NOTES.md's own past dated entries are also left untouched, since they're a
+historical record of what was found and when, not living documentation --
+this entry is additive, not a correction of those.
+
+**Reasoning:** calling this method an "oracle" implies an upper bound or
+ceiling on achievable containment, which the harness data contradicts --
+degree-centrality (a cheap structural rule) beats it on containment ratio
+(0.033 vs. 0.066, see harness_summary.csv), and every structural baseline
+does too (0.033-0.037 range vs. 0.066). An "oracle" that a $0.01/graph
+heuristic beats is a misleading name for a reviewer to encounter. "Greedy
+simulation-guided heuristic" instead names what it actually IS mechanistically
+(greedy, one-edge-at-a-time, guided by simulate_botnet outcomes rather than a
+structural/attention score) without asserting an optimality property the data
+doesn't support -- consistent with this project's existing "NOT labeled an
+upper bound" caveat (see the Milestone 2 greedy-oracle-myopia entry below),
+just now reflected in the name itself, not only in a caveat attached to it.
+
+This also sharpens a finding already on record rather than changing it: the
+method being beaten by a cheap structural rule is itself informative -- our
+existing search_rollouts=1-vs-5 diagnostic (see the Milestone 2 entry below)
+already showed that giving the greedy search a MORE accurate per-step signal
+(5 rollouts instead of 1) made outcomes WORSE, not better, at every pruning
+level tested. That rules out search noise as the explanation and points to
+the method's one-step-at-a-time myopia instead -- i.e. containment on these
+graphs is structure-dominated (a global, one-shot structural ranking like
+degree-centrality reliably finds better edges to cut than a locally-greedy
+search does), not simply noise-limited. The rename makes that reading
+available to a reader from the label alone, instead of requiring them to
+find the caveat buried in a docstring or NOTES.md entry.
+
 ## 2026-07-11 -- Milestone 4 GAT-depth and feature-masking ablations RESULTS: depth=2 is a sharp, two-sided sweet spot; missingness confirms robustness like noise did (COMPLETES THE REMAINING TWO OPTIONAL ABLATION GAPS)
 
 `demo_milestone4_depth_and_masking_ablation.py` (15 graphs, containment

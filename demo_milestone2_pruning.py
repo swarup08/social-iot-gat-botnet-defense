@@ -24,7 +24,8 @@ project:
 Implements the roadmap's static pruning strategies (threshold-based and
 top-k-per-node, both using the degree-corrected GAT attention score)
 alongside the supervisor-mandated baseline suite (random, degree-centrality,
-betweenness-centrality, highest-p_uv removal) AND a greedy oracle -- at each
+betweenness-centrality, highest-p_uv removal) AND a greedy simulation-guided
+heuristic -- at each
 level, whichever edge most reduces simulated infection is removed, one at a
 time -- the supervisor explicitly requested as a reference for how much a
 strategy that looks at outcomes directly, rather than a structural/attention
@@ -90,7 +91,7 @@ def build_pruned_graphs_for_level(graph, gat_scores, degree_scores, betweenness_
     pruned["random"] = [prune_random(graph, level, seed=1000 * repeat + 7) for repeat in range(N_RANDOM_PRUNE_REPEATS)]
     # NOT labeled "(upper bound)" -- see NOTES.md: it doesn't empirically
     # behave as one at 10-25% removal with this 1-rollout search signal.
-    pruned["greedy oracle"] = [greedy_checkpoints[level]]
+    pruned["greedy simulation-guided heuristic"] = [greedy_checkpoints[level]]
     return pruned
 
 
@@ -131,13 +132,13 @@ def main() -> None:
         f"precision={baseline_utility['precision']:.3f} (accuracy={baseline_utility['test_acc']:.3f}, shown for reference only)"
     )
 
-    print(f"\nrunning greedy oracle search (1 rollout/candidate for tractability; re-measured at full rigor below)...")
+    print(f"\nrunning greedy simulation-guided heuristic search (1 rollout/candidate for tractability; re-measured at full rigor below)...")
     oracle_start = time.time()
     greedy_checkpoints = greedy_oracle_prune(
         graph, p_uv, seed_nodes, max_remove_fraction=max(PRUNING_LEVELS), checkpoint_fractions=PRUNING_LEVELS, search_rollouts=GREEDY_ORACLE_SEARCH_ROLLOUTS
     )
     oracle_seconds = time.time() - oracle_start
-    print(f"  greedy oracle search took {oracle_seconds:.1f}s total (all {len(PRUNING_LEVELS)} checkpoints, one incremental run)")
+    print(f"  greedy simulation-guided heuristic search took {oracle_seconds:.1f}s total (all {len(PRUNING_LEVELS)} checkpoints, one incremental run)")
 
     results = []
     for level in PRUNING_LEVELS:
@@ -198,7 +199,7 @@ def main() -> None:
     if any(r["involves_low_baseline_seed"] for r in results):
         print("* one or more pooled seeds had a near-zero unpruned baseline; those seeds' ratios are noted as unreliable above.")
     print(
-        f"\ncompute cost note: the greedy oracle's search took {oracle_seconds:.1f}s total (all 3 checkpoints) vs. "
+        f"\ncompute cost note: the greedy simulation-guided heuristic's search took {oracle_seconds:.1f}s total (all 3 checkpoints) vs. "
         f"~0.01s per structural/attention method -- the cost of looking at simulate_botnet outcomes directly instead "
         f"of a precomputed score, reported here per this project's standard for expensive methods."
     )

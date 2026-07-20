@@ -477,3 +477,40 @@ def plot_utility_vs_pruning_level(results: List[Dict], output_path: str = "utili
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
     return output_path
+
+
+def plot_containment_vs_utility_tradeoff(rows: List[Dict], output_path: str = "containment_vs_utility_tradeoff.png") -> str:
+    """Supervisor-requested headline trade-off figure: one point per method,
+    containment ratio (x, lower = more contained) vs. frozen F1 (y, higher =
+    better core-task utility), each point labeled with its method name and
+    mean compute cost (mean_time_s) -- so the plot shows all three axes this
+    project cares about (security, utility, cost) at once, at a glance.
+
+    `rows` is a list of dicts, one per method, needing "method",
+    "containment_ratio_mean", "frozen_f1_mean", "mean_time_s" keys -- exactly
+    harness_summary.csv's row shape (read via csv.DictReader).
+    """
+    colors = plt.cm.tab10.colors
+    markers = ["o", "s", "^", "D", "v", "P", "X", "*"]
+
+    plt.figure(figsize=(8, 6))
+    for i, row in enumerate(rows):
+        x = row["containment_ratio_mean"]
+        y = row["frozen_f1_mean"]
+        plt.scatter(x, y, color=colors[i % len(colors)], marker=markers[i % len(markers)], s=70, zorder=3)
+        plt.annotate(
+            f"{row['method']}\n({row['mean_time_s']:.2f}s)",
+            (x, y),
+            textcoords="offset points",
+            xytext=(6, 6),
+            fontsize=8,
+        )
+
+    plt.xlabel("containment ratio (lower = more contained)")
+    plt.ylabel("frozen F1 (compromised class, higher = better utility)")
+    plt.title("Security/utility trade-off across methods (label = mean compute cost per graph)")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    return output_path

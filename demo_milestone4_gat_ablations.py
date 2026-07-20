@@ -1,7 +1,7 @@
 """Milestone 4: GAT-heads and noisy-feature ablations, using the harness.
 
-Quick pass (15 graphs, no RL/greedy oracle -- neither ablation question is
-about those) answering: does varying the GAT's architecture or corrupting
+Quick pass (15 graphs, no RL/greedy simulation-guided heuristic -- neither
+ablation question is about those) answering: does varying the GAT's architecture or corrupting
 its input features change the core finding (GAT-based pruning's containment
 standing relative to the structural baselines), or just confirm it's robust?
 

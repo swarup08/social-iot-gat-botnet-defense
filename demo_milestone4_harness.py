@@ -1,8 +1,8 @@
 """Milestone 4: 40-graph statistical evaluation harness.
 
 Foundation for every subsequent Milestone 4 ablation/stress-test. Runs all
-8 methods (6 static baselines + GAT-threshold + GAT-top-k, plus greedy
-oracle and a freshly-trained RL policy = 8) at a single ~50% removal level
+8 methods (6 static baselines + GAT-threshold + GAT-top-k, plus a greedy
+simulation-guided heuristic and a freshly-trained RL policy = 8) at a single ~50% removal level
 across 40 independent graph instances (same generator, varying seed), then:
   - reports per-method mean +/- std for containment ratio and frozen utility
   - runs ~12 curated PAIRED significance tests directly tied to the two
@@ -52,7 +52,7 @@ RL_EPISODES = 100
 RL_EPSILON_DECAY_EPISODES = 70
 MODEL_SEED = 0
 
-METHODS = ["RL", "GAT threshold", "GAT top-k", "degree-centrality", "betweenness-centrality", "highest-p_uv", "random", "greedy oracle"]
+METHODS = ["RL", "GAT threshold", "GAT top-k", "degree-centrality", "betweenness-centrality", "highest-p_uv", "random", "greedy simulation-guided heuristic"]
 
 # Curated pairs, directly tied to the two tentative single-graph findings --
 # NOT all 28 possible pairs (that would make the Holm correction so
@@ -66,7 +66,7 @@ PAIRS = [
     ("highest-p_uv", "betweenness-centrality"),
     # "RL beats random/oracle but not structural methods" (Milestone 3)
     ("RL", "random"),
-    ("RL", "greedy oracle"),
+    ("RL", "greedy simulation-guided heuristic"),
     ("RL", "GAT threshold"),
     ("RL", "GAT top-k"),
     ("RL", "degree-centrality"),
@@ -149,7 +149,7 @@ def run_one_graph(graph_seed: int) -> dict:
 
     t = time.time()
     checkpoints = greedy_oracle_prune(graph, p_uv, seed_nodes, max_remove_fraction=TARGET_LEVEL, checkpoint_fractions=[TARGET_LEVEL], search_rollouts=1)
-    measure("greedy oracle", [checkpoints[TARGET_LEVEL]], time.time() - t)
+    measure("greedy simulation-guided heuristic", [checkpoints[TARGET_LEVEL]], time.time() - t)
 
     t = time.time()
     env = PruningEnv(

@@ -38,7 +38,7 @@ infection-risk ranking), once tested rigorously?
   with degree-corrected attention-based edge importance scoring.
 - Two static pruning strategies (threshold, top-k-per-node) plus a full
   baseline suite: random, degree-centrality, betweenness-centrality,
-  highest-p_uv (direct risk ranking), and a greedy simulation oracle.
+  highest-p_uv (direct risk ranking), and a greedy simulation-guided heuristic.
 - A custom DQN agent that learns an adaptive edge-pruning policy on top
   of GAT attention scores, with per-decision trajectory logging for
   explainability (XAI).
@@ -66,7 +66,8 @@ Static Pruning   Baseline Suite     RL Adaptive Pruning (DQN)
 (threshold/top-k) (random/degree/    (attention-informed state,
                    betweenness/       XAI trajectory logging)
                    highest-p_uv/
-                   greedy oracle)
+                   greedy simulation-
+                   guided heuristic)
      -----------------------------------
             |
 Botnet Containment + Core-task Utility Evaluation

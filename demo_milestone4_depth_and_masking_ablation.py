@@ -4,8 +4,8 @@ Two remaining roadmap-requested ablation angles not covered by
 demo_milestone4_gat_ablations.py (which varied heads and added Gaussian
 noise): number of GAT layers, and "incomplete" (randomly zeroed / missing)
 features rather than noisy ones. Same harness pattern as that script: 15
-graphs, containment only, no RL/greedy oracle (neither question involves
-those).
+graphs, containment only, no RL/greedy simulation-guided heuristic (neither
+question involves those).
 
 Depth ablation uses GATNodeClassifierNLayer (src/milestone2.py) -- a
 separate, additive variable-depth model added specifically for this
