@@ -161,22 +161,30 @@ Edge pruning generally slows botnet spread while preserving core-task
 performance -- that part works. But across 40 independent graph
 instances, with paired significance tests and Holm-Bonferroni
 correction, the honest headline is stronger and simpler: **on this
-problem, simple structural pruning wins outright.** RL loses
-significantly to every one of GAT-threshold, GAT-top-k,
-degree-centrality, betweenness-centrality, and highest-p_uv (all
-Holm-corrected p<0.05) -- it only beats random and ties a greedy
-simulation-guided search. Degree-centrality is both the best method on
-containment and, at 0.0086s/graph vs. RL's 32.6s/graph, roughly
-**3800x cheaper**. It also holds the best security-utility balance
-(frozen F1 ~0.56, second only to the greedy heuristic's 0.63, well
-above highest-p_uv's or betweenness's ~0.42-0.46). Even the greedy
-simulation-guided heuristic -- which looks directly at simulated
-infection outcomes -- does not beat degree-centrality, suggesting
-containment on these graphs is structure-dominated, not just a matter
-of noisy search. Ablations further show the GAT+RL pipeline's
-containment finding is conditional on the specific architecture used
-(heads=4, depth=2) -- shallower, deeper, or wider architectures break
-it.
+problem, simple structural pruning beats learned GAT+RL containment,
+at a fraction of the cost.** RL loses significantly to every one of
+GAT-threshold, GAT-top-k, degree-centrality, betweenness-centrality,
+and highest-p_uv (all Holm-corrected p<0.05) -- it only beats random
+and ties the greedy simulation-guided heuristic.
+
+The result is a genuine Pareto frontier, not a single winner: **degree-
+centrality gives the best containment at trivial cost** (0.0086s/graph,
+~3800x cheaper than RL's 32.6s/graph), while **the greedy
+simulation-guided heuristic buys the best security-utility balance**
+(frozen F1 0.634 vs. degree's 0.562) at ~6000x degree's compute cost.
+Neither dominates the other, and the learned methods (GAT, RL) sit
+inside this frontier rather than on it. Even the greedy heuristic --
+which looks directly at simulated infection outcomes step by step --
+does not beat degree-centrality on containment, and a follow-up
+diagnostic (more search accuracy per step making outcomes *worse*, not
+better) confirms this is one-step-at-a-time myopia, not search noise --
+containment on these graphs is structure-dominated. Ablations further
+show the GAT+RL pipeline's containment finding is conditional on the
+specific architecture used (heads=4, depth=2) -- shallower, deeper, or
+wider architectures break it. The GAT classifier feeding two of the
+pruning methods also recovers only ~46% of compromised nodes, a
+limitation worth stating plainly since GAT attention is not a mature
+signal on its own.
 
 Full numbers, every caveat, and the dated record of how each finding
 was reached (including two methodological bugs found and fixed

@@ -8,7 +8,7 @@ from src.milestone1 import build_edge_features, build_node_features, compute_edg
 from src.milestone2 import DEFAULT_BETA
 from src.milestone2_pruning import (
     calibrate_topk_for_target_fraction,
-    greedy_oracle_prune,
+    greedy_simulation_guided_prune,
     plot_containment_vs_utility_tradeoff,
     plot_utility_vs_pruning_level,
     prune_highest_score,
@@ -79,7 +79,7 @@ class Milestone2PruningTests(unittest.TestCase):
         for u, v in self.graph.edges():
             self.assertTrue((u, v) in scores or (v, u) in scores)
 
-    def test_greedy_oracle_prune_removes_correct_counts_and_nests_checkpoints(self):
+    def test_greedy_simulation_guided_prune_removes_correct_counts_and_nests_checkpoints(self):
         graph = nx.barabasi_albert_graph(25, 2, seed=2)
         node_features = build_node_features(graph)
         edge_features = build_edge_features(graph)
@@ -87,7 +87,7 @@ class Milestone2PruningTests(unittest.TestCase):
         degrees = dict(graph.degree())
         seed_nodes = {"hub": max(degrees, key=degrees.get)}
 
-        checkpoints = greedy_oracle_prune(
+        checkpoints = greedy_simulation_guided_prune(
             graph, p_uv, seed_nodes, max_remove_fraction=0.3, checkpoint_fractions=[0.1, 0.3], search_rollouts=1
         )
 

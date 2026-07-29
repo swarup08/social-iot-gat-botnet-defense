@@ -164,7 +164,7 @@ def calibrate_topk_for_target_fraction(
     return best_k, best_pruned, best_fraction
 
 
-def greedy_oracle_prune(
+def greedy_simulation_guided_prune(
     graph: nx.Graph,
     p_uv: Dict[Tuple[int, int], float],
     seed_nodes: Dict[str, int],

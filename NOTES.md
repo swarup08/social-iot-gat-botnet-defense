@@ -3,6 +3,68 @@
 Running log of findings that need to survive into the final write-up but
 don't belong in code comments or README. Newest entries at the top.
 
+## 2026-07-11 -- Greedy-myopia search_rollouts=1-vs-5 diagnostic promoted to n=10 (supervisor-requested): original single-graph conclusion CONFIRMED, more cleanly than before
+
+The search_rollouts=1-vs-5 diagnostic (`demo_milestone2_greedy_myopia_diagnostic.py`,
+new script) reran the original single-graph comparison across 10 independent
+graph instances (different seeds, same n=300/m=3/DEFAULT_BETA generator, same
+3 pruning levels, same 5-seed-node containment methodology used everywhere
+else in this project). Exercises `greedy_simulation_guided_prune` -- the
+function renamed from `greedy_oracle_prune` earlier this session (see the
+rename entry below); this diagnostic and that rename are otherwise unrelated
+changes that happened to land close together.
+
+Smoke-tested on 1 graph first (714.5s: 29.8s rollouts=1 + 683.9s rollouts=5,
+matching the original single-graph timing closely) before committing to the
+full run -- confirmed cost was ~2 hours for n=10, accepted explicitly before
+running. Full run: 7848s (~131 min), 31.1s/graph mean for rollouts=1,
+752.7s/graph mean for rollouts=5 (~24x, consistent with the original
+diagnostic's ~23-29x observation, not just the naive 5x).
+
+**Containment ratio, mean +/- std across n=10 graphs, paired per graph:**
+
+| level | rollouts=1 | rollouts=5 | paired diff | paired p-value |
+|---|---|---|---|---|
+| 10% | 0.646+/-0.052 | 0.809+/-0.133 | -0.162 | 0.0122 |
+| 25% | 0.265+/-0.032 | 0.622+/-0.097 | -0.357 | <0.0001 |
+| 50% | 0.052+/-0.030 | 0.354+/-0.084 | -0.301 | <0.0001 |
+
+No Holm correction applied (only 3 targeted tests re-confirming one prior
+finding, not an exploratory family) -- but note all three would survive even
+a conservative Bonferroni threshold for 3 tests (0.05/3 = 0.0167): 0.0122 is
+under it, and the other two are far under it.
+
+**Verdict: the original single-graph conclusion holds up, and more cleanly
+than before.** At every one of the 3 pruning levels, giving the greedy search
+a MORE accurate per-step signal (5 rollouts instead of 1) produced
+SIGNIFICANTLY WORSE containment, not better -- the same direction the
+single-graph diagnostic showed, now with real statistical weight behind it
+(n=10, paired, p<0.02 at every level) instead of one graph's worth of
+evidence. If search noise were the main driver of this method's
+underperformance, more rollouts should have closed the gap at least
+sometimes across 10 graphs; instead the effect was unanimous and large
+(diffs of 0.16-0.36 in containment ratio, not small). This is additional
+confirmation of the myopia explanation over the noise explanation: a more
+accurate local signal lets the greedy search commit MORE reliably to the
+true locally-best edge at each step, which -- if the failure mode is
+structural (short-sightedness), not estimation error -- makes outcomes more
+consistently myopic, not less.
+
+**New at n=10, not visible in the single-graph version:** rollouts=5 is also
+noticeably LESS consistent across graphs than rollouts=1 (std roughly
+2.5-3x larger at every level: 0.133 vs. 0.052 at 10%, 0.097 vs. 0.032 at
+25%, 0.084 vs. 0.030 at 50%). The more expensive, "more accurate" search
+setting is both worse on average AND more variable graph-to-graph -- worth
+stating plainly in the final write-up rather than only reporting the mean
+shift.
+
+**Compute cost, for the record:** rollouts=5 costs ~24x rollouts=1's search
+time for a worse result on every level, across every graph tested -- not
+recommended as a "more careful" variant of this baseline; if anything this
+strengthens the case for reporting rollouts=1 (the setting used everywhere
+else in this project's harness/ablations) as the standard configuration,
+not a compute-constrained compromise.
+
 ## 2026-07-11 -- "greedy oracle" renamed to "greedy simulation-guided heuristic" (supervisor-requested relabel, no rerun)
 
 Per supervisor review of the harness results: renamed the "greedy oracle"

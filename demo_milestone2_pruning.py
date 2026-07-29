@@ -33,7 +33,7 @@ score, can achieve. NOT labeled an "upper bound" here: it uses a cheap
 1-rollout search signal for tractability (~300K candidate evaluations to
 reach 50% removal) and empirically does NOT outperform several cheap
 heuristics at 10-25% removal -- see NOTES.md's greedy-oracle entry for why,
-and greedy_oracle_prune's docstring in src/milestone2_pruning.py for the
+and greedy_simulation_guided_prune's docstring in src/milestone2_pruning.py for the
 compute-cost trade-off. The checkpoint graphs it returns ARE re-measured
 with the same full-rollout rigor as every other method for the numbers
 actually reported -- only the search itself uses the cheap signal.
@@ -54,7 +54,7 @@ from src.milestone2 import (
 from src.milestone2_pruning import (
     calibrate_topk_for_target_fraction,
     containment_ratio,
-    greedy_oracle_prune,
+    greedy_simulation_guided_prune,
     measure_security,
     measure_utility,
     pick_seed_nodes,
@@ -74,7 +74,7 @@ N_RANDOM_SEED_NODES = 3
 MODEL_SEED = 0
 SEED_NODE_RNG_SEED = 42
 CONTAINMENT_RATIO_EPSILON = 0.01
-GREEDY_ORACLE_SEARCH_ROLLOUTS = 1
+GREEDY_HEURISTIC_SEARCH_ROLLOUTS = 1
 
 
 def build_pruned_graphs_for_level(graph, gat_scores, degree_scores, betweenness_scores, p_uv, level, greedy_checkpoints):
@@ -134,8 +134,8 @@ def main() -> None:
 
     print(f"\nrunning greedy simulation-guided heuristic search (1 rollout/candidate for tractability; re-measured at full rigor below)...")
     oracle_start = time.time()
-    greedy_checkpoints = greedy_oracle_prune(
-        graph, p_uv, seed_nodes, max_remove_fraction=max(PRUNING_LEVELS), checkpoint_fractions=PRUNING_LEVELS, search_rollouts=GREEDY_ORACLE_SEARCH_ROLLOUTS
+    greedy_checkpoints = greedy_simulation_guided_prune(
+        graph, p_uv, seed_nodes, max_remove_fraction=max(PRUNING_LEVELS), checkpoint_fractions=PRUNING_LEVELS, search_rollouts=GREEDY_HEURISTIC_SEARCH_ROLLOUTS
     )
     oracle_seconds = time.time() - oracle_start
     print(f"  greedy simulation-guided heuristic search took {oracle_seconds:.1f}s total (all {len(PRUNING_LEVELS)} checkpoints, one incremental run)")

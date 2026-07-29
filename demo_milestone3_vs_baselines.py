@@ -27,7 +27,7 @@ from src.milestone2 import make_node_split
 from src.milestone2_pruning import (
     calibrate_topk_for_target_fraction,
     containment_ratio,
-    greedy_oracle_prune,
+    greedy_simulation_guided_prune,
     measure_security,
     measure_utility,
     measure_utility_frozen,
@@ -100,7 +100,7 @@ def main() -> None:
     }
 
     print("running greedy simulation-guided heuristic search to the 50% checkpoint (~25-30s)...")
-    greedy_checkpoints = greedy_oracle_prune(
+    greedy_checkpoints = greedy_simulation_guided_prune(
         env.original_graph, env.p_uv, env.seed_nodes, max_remove_fraction=TARGET_LEVEL, checkpoint_fractions=[TARGET_LEVEL], search_rollouts=1
     )
     pruned_by_method["greedy simulation-guided heuristic"] = [greedy_checkpoints[TARGET_LEVEL]]

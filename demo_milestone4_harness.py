@@ -30,7 +30,7 @@ from src.milestone2 import (
 from src.milestone2_pruning import (
     calibrate_topk_for_target_fraction,
     containment_ratio,
-    greedy_oracle_prune,
+    greedy_simulation_guided_prune,
     measure_security,
     measure_utility_frozen,
     pick_seed_nodes,
@@ -148,7 +148,7 @@ def run_one_graph(graph_seed: int) -> dict:
     measure("random", variants, time.time() - t)
 
     t = time.time()
-    checkpoints = greedy_oracle_prune(graph, p_uv, seed_nodes, max_remove_fraction=TARGET_LEVEL, checkpoint_fractions=[TARGET_LEVEL], search_rollouts=1)
+    checkpoints = greedy_simulation_guided_prune(graph, p_uv, seed_nodes, max_remove_fraction=TARGET_LEVEL, checkpoint_fractions=[TARGET_LEVEL], search_rollouts=1)
     measure("greedy simulation-guided heuristic", [checkpoints[TARGET_LEVEL]], time.time() - t)
 
     t = time.time()
