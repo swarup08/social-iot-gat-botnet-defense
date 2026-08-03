@@ -67,6 +67,30 @@ def score_edges_by_betweenness(graph: nx.Graph) -> Dict[Tuple[int, int], float]:
     return dict(nx.edge_betweenness_centrality(graph, normalized=True))
 
 
+def score_edges_by_eigenscore(graph: nx.Graph) -> Dict[Tuple[int, int], float]:
+    """Spectral/eigenvalue-based edge score: product of the two endpoints'
+    eigenvector centrality -- the comparator used in the edge-removal
+    epidemic-containment literature (Matamalas et al., Science Advances:
+    remove the edges that most reduce the adjacency matrix's largest
+    eigenvalue). Eigenvector centrality is the standard per-node proxy for
+    that -- high-centrality nodes contribute most to the spectral radius, so
+    ranking edges by the PRODUCT of their endpoints' centrality approximates
+    targeting the largest eigenvalue directly, without recomputing an
+    eigenvalue for every candidate edge at every step (which is what an
+    exact greedy-on-eigenvalue search would require).
+
+    Falls back to the exact (numpy-based) eigenvector centrality solver if
+    the default power-iteration method fails to converge on this graph --
+    the power-iteration method is much cheaper but occasionally doesn't
+    converge within its iteration budget on some graphs.
+    """
+    try:
+        centrality = nx.eigenvector_centrality(graph, max_iter=1000)
+    except nx.PowerIterationFailedConvergence:
+        centrality = nx.eigenvector_centrality_numpy(graph)
+    return {(u, v): centrality[u] * centrality[v] for u, v in graph.edges()}
+
+
 def _get_score(scores: Dict[Tuple[int, int], float], u: int, v: int) -> float:
     return scores.get((u, v), scores.get((v, u)))
 
@@ -491,18 +515,35 @@ def plot_containment_vs_utility_tradeoff(rows: List[Dict], output_path: str = "c
     harness_summary.csv's row shape (read via csv.DictReader).
     """
     colors = plt.cm.tab10.colors
-    markers = ["o", "s", "^", "D", "v", "P", "X", "*"]
+    markers = ["o", "s", "^", "D", "v", "P", "X", "*", "h"]
+
+    xs = [row["containment_ratio_mean"] for row in rows]
+    ys = [row["frozen_f1_mean"] for row in rows]
+    x_range = (max(xs) - min(xs)) or 1.0
+    y_range = (max(ys) - min(ys)) or 1.0
 
     plt.figure(figsize=(8, 6))
     for i, row in enumerate(rows):
-        x = row["containment_ratio_mean"]
-        y = row["frozen_f1_mean"]
+        x, y = xs[i], ys[i]
         plt.scatter(x, y, color=colors[i % len(colors)], marker=markers[i % len(markers)], s=70, zorder=3)
+        # Points that land close together in this (very different-scale) 2D
+        # space -- e.g. eigenscore vs. betweenness-centrality -- would
+        # otherwise render overlapping text. For each point, count how many
+        # EARLIER points are within 5% of the axis range in both dimensions
+        # and push the label progressively further below the marker for
+        # each one found, so a cluster's labels stack readably instead of
+        # overlapping.
+        close_count = sum(
+            1
+            for j in range(i)
+            if abs(x - xs[j]) / x_range < 0.05 and abs(y - ys[j]) / y_range < 0.05
+        )
+        y_offset = 6 - close_count * 24
         plt.annotate(
             f"{row['method']}\n({row['mean_time_s']:.2f}s)",
             (x, y),
             textcoords="offset points",
-            xytext=(6, 6),
+            xytext=(6, y_offset),
             fontsize=8,
         )
 

@@ -1,18 +1,31 @@
 """Milestone 4: 40-graph statistical evaluation harness.
 
 Foundation for every subsequent Milestone 4 ablation/stress-test. Runs all
-8 methods (6 static baselines + GAT-threshold + GAT-top-k, plus a greedy
-simulation-guided heuristic and a freshly-trained RL policy = 8) at a single ~50% removal level
-across 40 independent graph instances (same generator, varying seed), then:
+9 methods (7 static baselines + GAT-threshold + GAT-top-k, plus a greedy
+simulation-guided heuristic and a freshly-trained RL policy = 9) at a single
+~50% removal level across 40 independent graph instances (same generator,
+varying seed), then:
   - reports per-method mean +/- std for containment ratio and frozen utility
-  - runs ~12 curated PAIRED significance tests directly tied to the two
-    tentative single-graph findings from Milestones 2-3
+  - runs 14 curated PAIRED significance tests directly tied to specific
+    tentative findings from Milestones 2-3 and a supervisor-flagged
+    literature gap (Milestone 4: no spectral/eigenvalue-based baseline)
   - applies Holm correction across that whole test family
   - reports absolute effect sizes (mean differences) alongside every p-value
   - reports aggregate compute cost per method
 
+The "eigenscore" baseline (score_edges_by_eigenscore, src/milestone2_pruning.py)
+was added after the original 8-method/12-pair run, per supervisor review:
+the accepted comparator in the edge-removal epidemic-containment literature
+(Matamalas et al., Science Advances) is removing edges that most reduce the
+adjacency matrix's largest eigenvalue; eigenvector-centrality-product per
+edge is the standard proxy for that. This is the one explicitly-authorized
+exception to "no new experiments after week 2" -- see NOTES.md.
+
 Three compute-driven scope decisions (frozen-only utility, 100-episode RL,
-single pruning level) are recorded in NOTES.md, decided BEFORE this ran.
+single pruning level) are recorded in NOTES.md, decided BEFORE the original
+run. "eigenscore" reuses the identical harness/methodology, added as a 9th
+method rather than a separate script, so it is directly comparable to the
+other 8 on the same 40 graph instances.
 """
 
 import statistics
@@ -39,6 +52,7 @@ from src.milestone2_pruning import (
     prune_random,
     score_edges_by_avg_hub_score,
     score_edges_by_betweenness,
+    score_edges_by_eigenscore,
 )
 from src.milestone3 import PruningEnv
 from src.milestone3_dqn import run_greedy_episode, train_dqn
@@ -52,11 +66,22 @@ RL_EPISODES = 100
 RL_EPSILON_DECAY_EPISODES = 70
 MODEL_SEED = 0
 
-METHODS = ["RL", "GAT threshold", "GAT top-k", "degree-centrality", "betweenness-centrality", "highest-p_uv", "random", "greedy simulation-guided heuristic"]
+METHODS = [
+    "RL",
+    "GAT threshold",
+    "GAT top-k",
+    "degree-centrality",
+    "betweenness-centrality",
+    "highest-p_uv",
+    "random",
+    "greedy simulation-guided heuristic",
+    "eigenscore",
+]
 
-# Curated pairs, directly tied to the two tentative single-graph findings --
-# NOT all 28 possible pairs (that would make the Holm correction so
-# conservative almost nothing could survive it, for questions we don't have).
+# Curated pairs, directly tied to specific tentative findings/reviewer
+# questions -- NOT all pairwise combinations (that would make the Holm
+# correction so conservative almost nothing could survive it, for questions
+# we don't have).
 PAIRS = [
     # "No structural method dominates" (Milestone 2, post simulate_botnet fix)
     ("GAT threshold", "GAT top-k"),
@@ -72,6 +97,10 @@ PAIRS = [
     ("RL", "degree-centrality"),
     ("RL", "betweenness-centrality"),
     ("RL", "highest-p_uv"),
+    # Spectral/eigenvalue-based baseline vs. the two comparisons a reviewer
+    # will most want to see (supervisor-flagged literature gap, Milestone 4)
+    ("eigenscore", "degree-centrality"),
+    ("eigenscore", "RL"),
 ]
 
 
@@ -146,6 +175,11 @@ def run_one_graph(graph_seed: int) -> dict:
     t = time.time()
     variants = [prune_random(graph, TARGET_LEVEL, seed=1000 * i + 7) for i in range(N_RANDOM_REPEATS)]
     measure("random", variants, time.time() - t)
+
+    t = time.time()
+    eigenscore_scores = score_edges_by_eigenscore(graph)
+    g = prune_highest_score(graph, eigenscore_scores, TARGET_LEVEL)
+    measure("eigenscore", [g], time.time() - t)
 
     t = time.time()
     checkpoints = greedy_simulation_guided_prune(graph, p_uv, seed_nodes, max_remove_fraction=TARGET_LEVEL, checkpoint_fractions=[TARGET_LEVEL], search_rollouts=1)

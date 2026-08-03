@@ -16,6 +16,7 @@ from src.milestone2_pruning import (
     prune_random,
     prune_topk_per_node,
     score_edges_by_betweenness,
+    score_edges_by_eigenscore,
 )
 
 
@@ -78,6 +79,22 @@ class Milestone2PruningTests(unittest.TestCase):
 
         for u, v in self.graph.edges():
             self.assertTrue((u, v) in scores or (v, u) in scores)
+
+    def test_score_edges_by_eigenscore_covers_every_edge_and_favors_hub_edges(self):
+        scores = score_edges_by_eigenscore(self.graph)
+
+        for u, v in self.graph.edges():
+            self.assertTrue((u, v) in scores or (v, u) in scores)
+        self.assertTrue(all(v >= 0.0 for v in scores.values()))
+
+        # The highest-scored edge should connect two relatively high-degree
+        # (hub-ish) nodes -- eigenvector centrality rewards being connected
+        # to well-connected neighbors, so the top edge shouldn't be one
+        # touching only min-degree leaf nodes.
+        degrees = dict(self.graph.degree())
+        top_edge = max(scores, key=scores.get)
+        min_degree = min(degrees.values())
+        self.assertTrue(degrees[top_edge[0]] > min_degree or degrees[top_edge[1]] > min_degree)
 
     def test_greedy_simulation_guided_prune_removes_correct_counts_and_nests_checkpoints(self):
         graph = nx.barabasi_albert_graph(25, 2, seed=2)

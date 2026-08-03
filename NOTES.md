@@ -3,6 +3,88 @@
 Running log of findings that need to survive into the final write-up but
 don't belong in code comments or README. Newest entries at the top.
 
+## 2026-07-11 -- Added eigenscore (spectral/eigenvalue-based) baseline, rerun full 40-graph harness at n=9 methods / 14 pairs: closes a real literature gap, but changes NO conclusion -- it lands exactly where degree-centrality does
+
+Supervisor flagged that none of the 8 existing baselines is spectral/
+eigenvalue-based, the accepted standard in the edge-removal epidemic-
+containment literature (Matamalas et al., Science Advances: remove edges
+that most reduce the adjacency matrix's largest eigenvalue). Added
+`score_edges_by_eigenscore` (`src/milestone2_pruning.py`): eigenvector
+centrality per node (`nx.eigenvector_centrality`, falling back to
+`nx.eigenvector_centrality_numpy` on non-convergence -- never triggered in
+practice on these graphs, converged in <20ms every time), edge score = the
+product of its two endpoints' centrality, pruned the same way as
+degree-centrality/betweenness/highest-p_uv (`prune_highest_score`, remove
+the highest-scored edges directly). This is the one explicitly-authorized
+exception to "no new experiments after week 2" -- supervisor approved the
+harness rerun specifically for this addition.
+
+Wired in as a 9th method in `demo_milestone4_harness.py` (same 40 graphs,
+same ~50% removal level, same measurement pipeline as the other 8 -- not a
+separate script) and added 2 new curated pairs (`eigenscore` vs.
+`degree-centrality`, `eigenscore` vs. `RL` -- the two comparisons a reviewer
+would ask for first), bringing the family to 14 pairs. Holm correction is
+computed correctly across the full 14-test family in one call (not the
+original 12 plus 2 appended afterward) -- `run_paired_tests_with_correction`
+already applies correction across whatever pair list it's given, so this
+required no special handling, just adding the 2 pairs to the existing list.
+
+Smoke-tested (1-graph timing, then a 2-graph full-pipeline dry run through
+`main()`) before committing to the rerun -- eigenscore adds ~0.03s/graph,
+negligible against the harness's existing ~90-95s/graph average. Full rerun:
+3761s (~63 min, in line with the original 8-method run's 62 min).
+
+**Eigenscore's numbers, n=40:**
+
+| metric | eigenscore | degree-centrality | RL |
+|---|---|---|---|
+| containment_ratio | 0.033+/-0.006 | 0.033+/-0.006 | 0.072+/-0.043 |
+| frozen_recall | 0.355 | 0.462 | 0.511 |
+| frozen_f1 | 0.458 | 0.562 | 0.543 |
+| mean_time_s | 0.034 | 0.011 | 38.72 |
+
+**vs. degree-centrality (containment):** statistically indistinguishable --
+mean difference ~0.0001, raw_p=0.8607, holm_p=1.0. The literature-standard
+spectral method lands in EXACTLY the same place degree-centrality does on
+containment, at essentially the same (trivial) cost. This is the important
+result for the write-up: it is not that this project happened to omit the
+one baseline that would have beaten degree-centrality -- the field's own
+accepted comparator ties it, not beats it.
+
+**vs. RL (containment):** eigenscore is significantly BETTER --
+mean_diff=-0.039, raw_p<0.0001, holm_p<0.0001. Same pattern every other
+structural baseline already showed: cheap, structure-only methods
+significantly beat RL on containment. Eigenscore is not an exception to the
+project's core finding; it reinforces it with the field's own preferred
+method.
+
+**Where eigenscore is NOT competitive: core-task utility.** Its frozen F1
+(0.458) is among the WORST in the full 9-method table -- better only than
+highest-p_uv's 0.423, worse than random's 0.466, and well below
+degree-centrality's 0.562 or the GAT-based methods' 0.53-0.54. Ranking
+edges by pure eigenvector-centrality product apparently removes edges the
+frozen GAT classifier depended on more than degree-centrality's ranking
+does, even though the two methods pick nearly the same containment-relevant
+edges overall. Worth stating plainly rather than only reporting the
+containment tie: eigenscore matches the best structural method on security
+but not on utility, so it does not change which method looks best when both
+axes are considered together (see containment_vs_utility_tradeoff.png,
+regenerated with all 9 points -- eigenscore sits in the lower-left cluster
+with betweenness-centrality and highest-p_uv, not near degree-centrality
+despite the containment tie).
+
+**Bottom line for the write-up:** adding the literature's own spectral
+baseline changes no conclusion in this project -- it does not beat
+degree-centrality, does not beat RL's containment gap into a win, and does
+not change the Pareto-frontier framing (degree-centrality still gives the
+best containment-per-cost; the greedy simulation-guided heuristic still
+gives the best utility-per-cost among structural methods). What it DOES do
+is close a real, specific gap a reviewer would otherwise flag: the
+project's baseline suite now includes the field's accepted comparator, and
+its result is a genuine (not favorable-looking) tie with the simplest
+structural heuristic, which is itself informative about how structure-
+dominated containment is on these graphs.
+
 ## 2026-07-11 -- Greedy-myopia search_rollouts=1-vs-5 diagnostic promoted to n=10 (supervisor-requested): original single-graph conclusion CONFIRMED, more cleanly than before
 
 The search_rollouts=1-vs-5 diagnostic (`demo_milestone2_greedy_myopia_diagnostic.py`,
