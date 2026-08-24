@@ -38,7 +38,9 @@ infection-risk ranking), once tested rigorously?
   with degree-corrected attention-based edge importance scoring.
 - Two static pruning strategies (threshold, top-k-per-node) plus a full
   baseline suite: random, degree-centrality, betweenness-centrality,
-  highest-p_uv (direct risk ranking), and a greedy simulation-guided heuristic.
+  highest-p_uv (direct risk ranking), eigenscore (spectral/eigenvector-
+  centrality, matching the edge-removal epidemic-containment literature's
+  standard baseline), and a greedy simulation-guided heuristic.
 - A custom DQN agent that learns an adaptive edge-pruning policy on top
   of GAT attention scores, with per-decision trajectory logging for
   explainability (XAI).
@@ -164,16 +166,28 @@ correction, the honest headline is stronger and simpler: **on this
 problem, simple structural pruning beats learned GAT+RL containment,
 at a fraction of the cost.** RL loses significantly to every one of
 GAT-threshold, GAT-top-k, degree-centrality, betweenness-centrality,
-and highest-p_uv (all Holm-corrected p<0.05) -- it only beats random
-and ties the greedy simulation-guided heuristic.
+highest-p_uv, and eigenscore (all Holm-corrected p<0.05) -- it only
+beats random and ties the greedy simulation-guided heuristic. Eigenscore
+(edges ranked by the product of their endpoints' eigenvector
+centrality) is the field's accepted spectral/eigenvalue standard for
+edge-removal epidemic containment -- and it ties degree-centrality
+exactly (Holm-corrected p=1.0), it does not beat it -- even the
+spectral method the epidemic-containment literature treats as the
+principled optimum does not beat plain degree centrality here, and it
+still buries the learned pipeline.
 
 The result is a genuine Pareto frontier, not a single winner: **degree-
-centrality gives the best containment at trivial cost** (0.0086s/graph,
-~3800x cheaper than RL's 32.6s/graph), while **the greedy
+centrality gives the best containment at trivial cost** (0.0108s/graph,
+~3600x cheaper than RL's 38.7s/graph), while **the greedy
 simulation-guided heuristic buys the best security-utility balance**
-(frozen F1 0.634 vs. degree's 0.562) at ~6000x degree's compute cost.
+(frozen F1 0.634 vs. degree's 0.562) at ~4200x degree's compute cost.
 Neither dominates the other, and the learned methods (GAT, RL) sit
-inside this frontier rather than on it. Even the greedy heuristic --
+inside this frontier rather than on it. Degree-centrality is, in fact,
+the *only* structural method that holds both axes at once: eigenscore
+(frozen F1 0.458), betweenness-centrality (0.455), and highest-p_uv
+(0.423) all buy their containment by cutting edges the core task needs,
+landing in the same low-utility corner rather than matching degree's
+combination of cheap, strong containment, and preserved utility. Even the greedy heuristic --
 which looks directly at simulated infection outcomes step by step --
 does not beat degree-centrality on containment, and a follow-up
 diagnostic (more search accuracy per step making outcomes *worse*, not
