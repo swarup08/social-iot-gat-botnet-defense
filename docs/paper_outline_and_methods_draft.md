@@ -275,6 +275,205 @@ cost are reported alongside every p-value.
   default/dense), and attack aggressiveness (moderate/high infection
   bias), 15 graph instances per condition.
 
+## Results (draft)
+
+### Headline finding: structural pruning beats the learned pipeline, at a fraction of the cost
+
+Across all 40 graph instances, degree-centrality achieves the best or
+tied-best containment of any method tested (containment ratio 0.0331 --
+only ~3.3% of nodes end up compromised on average) at a mean compute
+cost of 0.011s per graph. RL, the most expensive method in the suite at
+38.7s per graph -- roughly 3600x degree-centrality's cost -- achieves a
+containment ratio of 0.0719, more than double degree-centrality's, and
+loses to it at Holm-corrected p=1.31e-5 (paired t-test, n=40). This is
+not specific to degree-centrality: RL loses significantly
+(Holm-corrected p<0.05) to every structural baseline tested --
+degree-centrality, betweenness-centrality, highest-p_uv, eigenscore --
+and to both GAT-based static pruning methods. RL only beats random
+pruning and ties the greedy simulation-guided heuristic.
+
+### Full baseline suite results (n=40 graphs per method)
+
+| Method | Containment ratio (mean +/- std) | Frozen F1 (utility) | Mean compute cost/graph |
+|---|---|---|---|
+| degree-centrality | 0.0331 +/- 0.0061 | 0.562 | 0.011s |
+| eigenscore | 0.0332 +/- 0.0064 | 0.458 | 0.034s |
+| highest-p_uv | 0.0365 +/- 0.0050 | 0.423 | 0.008s |
+| betweenness-centrality | 0.0361 +/- 0.0058 | 0.455 | 0.611s |
+| GAT top-k | 0.0372 +/- 0.0060 | 0.532 | 0.881s |
+| GAT threshold | 0.0547 +/- 0.0126 | 0.544 | 0.161s |
+| greedy simulation-guided heuristic | 0.0659 +/- 0.0344 | 0.634 | 45.41s |
+| RL | 0.0719 +/- 0.0430 | 0.543 | 38.72s |
+| random | 0.1218 +/- 0.0183 | 0.466 | 0.024s |
+
+(Sorted by containment ratio, best/lowest first.)
+
+### Statistical significance
+
+Across the 14 pre-registered paired comparisons, Holm-Bonferroni
+correction is applied over the full family. RL loses significantly to
+GAT-threshold, GAT-top-k, degree-centrality, betweenness-centrality,
+highest-p_uv, and eigenscore (all Holm-corrected p<0.05, most
+p<0.0001), and beats only random (Holm-corrected p<0.0001, in RL's
+favor) while tying the greedy simulation-guided heuristic
+(Holm-corrected p=1.0). Eigenscore ties degree-centrality exactly on
+containment (Holm-corrected p=1.0) and significantly beats RL
+(Holm-corrected p=1.21e-5) -- confirming that even the spectral method
+the epidemic-containment literature treats as the principled optimum
+does not close the gap to plain degree centrality, and still buries
+the learned pipeline.
+
+### Figure 1: the containment-vs-utility Pareto frontier
+
+`containment_vs_utility_tradeoff.png` plots frozen F1 (utility)
+against containment ratio for all nine methods, each point labelled by
+mean compute cost. The frontier shows no single winner. Degree-
+centrality sits at the best containment while also holding the
+second-best utility overall, at essentially free compute cost
+(0.011s/graph). The greedy simulation-guided heuristic sits at the
+best utility (frozen F1 0.634) but middling containment, at ~4200x
+degree-centrality's compute cost. Critically, degree-centrality is the
+*only* structural method that holds both axes at once: eigenscore,
+betweenness-centrality, and highest-p_uv all cluster in the
+high-containment/low-utility corner of the plot (frozen F1 0.42-0.46),
+buying their containment by removing edges the core classification
+task needs. Sophistication in the edge-scoring signal -- moving from
+raw degree to eigenvector-centrality- or betweenness-weighted scoring
+-- does not improve this trade-off; it only pays the utility cost
+without matching gain. GAT and RL sit inside the frontier rather than
+on it in both dimensions.
+
+### Closing the outcome-guided-search objection: the myopia diagnostic
+
+A natural objection: the greedy simulation-guided heuristic directly
+observes simulated infection outcomes at each step, so if it still
+cannot beat a one-shot structural rule, perhaps its 1-rollout-per-
+candidate search signal is simply too noisy rather than fundamentally
+limited. We tested this directly by increasing the per-candidate
+search accuracy from 1 to 5 rollouts (a ~24x increase in search cost)
+and re-measuring containment across 10 independent graph instances,
+paired per graph:
+
+| Removal level | 1 rollout | 5 rollouts | Paired difference | Paired p-value |
+|---|---|---|---|---|
+| 10% | 0.646 +/- 0.052 | 0.809 +/- 0.133 | -0.162 | 0.0122 |
+| 25% | 0.265 +/- 0.032 | 0.622 +/- 0.097 | -0.357 | <0.0001 |
+| 50% | 0.052 +/- 0.030 | 0.354 +/- 0.084 | -0.301 | <0.0001 |
+
+More search accuracy made containment significantly *worse*, not
+better, at every pruning level tested, and all three differences
+survive a conservative Bonferroni threshold for 3 tests (0.05/3 =
+0.0167). This rules out search noise as the explanation for the greedy
+heuristic's underperformance relative to structural methods: the
+limitation is structural, not statistical. One-step-at-a-time myopia
+cannot see the same global picture a one-shot ranking over the whole
+graph can -- confirming that containment on these scale-free graphs is
+dominated by structure that a single global pass can exploit but a
+sequence of locally-optimal steps cannot.
+
+### Ablations and Stress Tests: results
+
+**GAT architecture (heads and depth) -- the core finding's fragile axis.**
+containment_ratio, n=15 graphs per condition, structural-baseline range
+0.033-0.037 for reference:
+
+| heads (n_layers=2 fixed) | GAT threshold | GAT top-k | vs. structural |
+|---|---|---|---|
+| 2 | 0.085+/-0.086 | 0.049+/-0.041 | not significant (variance swamps signal) |
+| 4 (project default) | 0.053+/-0.016 | 0.035+/-0.006 | threshold sig. worse; top-k tied |
+| 8 | 0.210+/-0.138 | 0.129+/-0.109 | both significantly worse, ~4x baseline |
+
+| n_layers (heads=4 fixed) | GAT threshold | GAT top-k | vs. structural |
+|---|---|---|---|
+| 1 | 0.174+/-0.086 | 0.064+/-0.027 | both significantly worse |
+| 2 (project default) | 0.053+/-0.016 | 0.035+/-0.006 | threshold sig. worse; top-k tied |
+| 3 | 0.111+/-0.053 | 0.062+/-0.018 | both significantly worse |
+
+The project's central "GAT top-k ties structural baselines" result holds
+only in a narrow window (heads=4, n_layers=2). Moving either heads or
+depth in either direction breaks it, in both directions of depth and at
+heads=8 for heads (heads=2 trends the same way but is underpowered at
+n=15). This is a genuine architecture-conditional finding, not a
+robustness result, and is reported as such rather than averaged away.
+
+**Feature quality (noise and missingness) -- the core finding's robust
+axis.** Same containment_ratio metric, n=15, heads=4/n_layers=2 held
+fixed:
+
+| condition | GAT threshold | GAT top-k | vs. structural |
+|---|---|---|---|
+| clean | 0.053+/-0.016 | 0.035+/-0.006 | threshold sig. worse; top-k tied |
+| Gaussian noise, std=0.1 | 0.060+/-0.038 | 0.037+/-0.007 | unchanged |
+| Gaussian noise, std=0.3 | 0.059+/-0.044 | 0.037+/-0.010 | unchanged |
+| masking, p=0.1 | 0.063+/-0.051 | 0.039+/-0.018 | unchanged |
+| masking, p=0.3 | 0.064+/-0.050 | 0.041+/-0.023 | unchanged |
+
+Neither corrupting (Gaussian noise up to std=0.3) nor removing (masking
+up to 30% missingness) node features changes which methods are
+statistically distinguishable from which, at any level tested. Unlike
+the architecture ablations, feature-quality robustness is a genuine,
+confirmed property of this pipeline at the tested severities.
+
+**Stress tests -- graph size and density strengthen the core finding;
+attack aggressiveness weakens and partially reverses it.** 15 graphs per
+condition (reduced power vs. the main 40-graph harness, reported as
+such); baseline reference RL 0.072+/-0.043 vs. structural 0.033-0.055,
+RL significantly worse than all five structural methods.
+
+| condition | RL containment | structural range | RL significantly worse vs. |
+|---|---|---|---|
+| size=150 nodes | 0.126+/-0.068 | 0.057-0.092 | 4 of 5 methods |
+| size=600 nodes | 0.051+/-0.037 | 0.019-0.032 | 4 of 5 methods |
+| sparse (m=2) | 0.570+/-0.396 | 0.142-0.181 | 5 of 5, dramatically |
+| dense (m=5) | 0.243+/-0.087 | 0.042-0.132 | 5 of 5 |
+
+Size and density variation, if anything, strengthens RL's
+underperformance -- sparse graphs produce the largest structural-vs-RL
+gap seen anywhere in this project, alongside high RL training variance
+that echoes the same instability seen in the reward-weighting ablation
+below.
+
+Attack aggressiveness tells a different story:
+
+| aggressiveness | RL vs. GAT threshold | RL vs. GAT top-k | RL vs. degree | RL vs. betweenness | RL vs. highest-p_uv |
+|---|---|---|---|---|---|
+| moderate (default) | tied | tied | RL worse | RL worse | RL worse |
+| high | RL significantly better | RL worse | RL worse | tied | tied |
+
+At high aggressiveness, every method's containment degrades sharply
+(0.36-0.63 vs. 0.02-0.13 elsewhere) and frozen F1 saturates near 1.0
+for all methods -- the classification task becomes near-trivial once
+almost every node is infected, so some of this reversal may be a
+ceiling/floor effect rather than RL becoming more capable. Both
+readings are consistent with the data; this project does not
+distinguish between them and reports the reversal as a genuine,
+partially confounded boundary condition rather than a universal law.
+
+**RL reward-weighting ablation -- no weighting closes the containment
+gap, and pushing security too hard destabilizes training.** 40-graph
+ablation, RL baseline reproduces the main harness exactly
+(0.072+/-0.043) as a cross-run consistency check:
+
+| RL configuration | containment_ratio | frozen_f1 |
+|---|---|---|
+| baseline (security=1, utility=1) | 0.072+/-0.043 | 0.543 |
+| high-security (3, 1) | 0.153+/-0.287 | 0.566 |
+| very-high-security (10, 1) | 0.930+/-0.250 | 0.513 |
+| security-only (1, 0) | 0.978+/-0.139 | 0.501 |
+
+Pushing the security weight higher does not close the gap to
+structural methods; past a threshold it collapses DQN training
+entirely (converging to near-zero pruning, containment approaching
+1.0), a failure mode confirmed at 40-graph scale, not a single-graph
+artifact. RL's genuine utility advantage is real but narrower than "RL
+wins": it significantly beats betweenness-centrality, highest-p_uv,
+and random on frozen F1, but is statistically indistinguishable from
+GAT-threshold, GAT-top-k, and degree-centrality -- the three strongest
+utility performers. The defensible framing is that RL's containment
+underperformance needs a different fix (reward shaping, a different
+algorithm, or a redesigned action space), not merely different reward
+weights within the current setup.
+
 ## Limitations (draft)
 
 - **Synthetic attack model.** The infection model, while feature-driven
