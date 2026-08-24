@@ -32,7 +32,8 @@ strategy that looks at outcomes directly, rather than a structural/attention
 score, can achieve. NOT labeled an "upper bound" here: it uses a cheap
 1-rollout search signal for tractability (~300K candidate evaluations to
 reach 50% removal) and empirically does NOT outperform several cheap
-heuristics at 10-25% removal -- see NOTES.md's greedy-oracle entry for why,
+heuristics at 10-25% removal -- see NOTES.md's "Milestone 2 greedy oracle:
+does NOT behave as an upper bound at ANY pruning level tested" entry for why,
 and greedy_simulation_guided_prune's docstring in src/milestone2_pruning.py for the
 compute-cost trade-off. The checkpoint graphs it returns ARE re-measured
 with the same full-rollout rigor as every other method for the numbers
@@ -133,12 +134,12 @@ def main() -> None:
     )
 
     print(f"\nrunning greedy simulation-guided heuristic search (1 rollout/candidate for tractability; re-measured at full rigor below)...")
-    oracle_start = time.time()
+    greedy_search_start = time.time()
     greedy_checkpoints = greedy_simulation_guided_prune(
         graph, p_uv, seed_nodes, max_remove_fraction=max(PRUNING_LEVELS), checkpoint_fractions=PRUNING_LEVELS, search_rollouts=GREEDY_HEURISTIC_SEARCH_ROLLOUTS
     )
-    oracle_seconds = time.time() - oracle_start
-    print(f"  greedy simulation-guided heuristic search took {oracle_seconds:.1f}s total (all {len(PRUNING_LEVELS)} checkpoints, one incremental run)")
+    greedy_search_seconds = time.time() - greedy_search_start
+    print(f"  greedy simulation-guided heuristic search took {greedy_search_seconds:.1f}s total (all {len(PRUNING_LEVELS)} checkpoints, one incremental run)")
 
     results = []
     for level in PRUNING_LEVELS:
@@ -199,7 +200,7 @@ def main() -> None:
     if any(r["involves_low_baseline_seed"] for r in results):
         print("* one or more pooled seeds had a near-zero unpruned baseline; those seeds' ratios are noted as unreliable above.")
     print(
-        f"\ncompute cost note: the greedy simulation-guided heuristic's search took {oracle_seconds:.1f}s total (all 3 checkpoints) vs. "
+        f"\ncompute cost note: the greedy simulation-guided heuristic's search took {greedy_search_seconds:.1f}s total (all 3 checkpoints) vs. "
         f"~0.01s per structural/attention method -- the cost of looking at simulate_botnet outcomes directly instead "
         f"of a precomputed score, reported here per this project's standard for expensive methods."
     )

@@ -89,7 +89,7 @@ PAIRS = [
     ("degree-centrality", "betweenness-centrality"),
     ("degree-centrality", "highest-p_uv"),
     ("highest-p_uv", "betweenness-centrality"),
-    # "RL beats random/oracle but not structural methods" (Milestone 3)
+    # "RL beats random/greedy simulation-guided heuristic but not structural methods" (Milestone 3)
     ("RL", "random"),
     ("RL", "greedy simulation-guided heuristic"),
     ("RL", "GAT threshold"),
