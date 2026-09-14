@@ -161,19 +161,34 @@ def _feature_vector(node_features: Dict[int, Dict[str, float]], edge_features: D
 
     The vector combines node-side risk and hubness terms with edge-level interaction.
     The exact ordering must match the beta vector supplied to compute_edge_infection_probabilities.
+
+    IMPORTANT (fix for supervisor-flagged orientation bug): this is an UNDIRECTED
+    edge -- graph.edges() hands us (u, v) in whatever order NetworkX's internal
+    adjacency storage happens to produce, which is an arbitrary implementation
+    detail (and in a Barabasi-Albert graph, node id correlates with node age,
+    so "arbitrary" here is not even random -- it's systematically tied to age).
+    The infection probability must therefore be a SYMMETRIC function of the two
+    endpoints: swapping which node we call u vs v must not change p_uv. We
+    enforce that by combining each endpoint pair with a commutative operation
+    (sum) instead of giving u's and v's copies of the same feature separate,
+    unequal beta weights -- summing is symmetric because a + b == b + a
+    regardless of which endpoint is labelled u and which is labelled v.
     """
     node_u = node_features[u]
     node_v = node_features[v]
     edge_uv = edge_features.get((u, v), edge_features.get((v, u), {}))
 
+    # Sum (not a per-endpoint pair of separate features) so the result is
+    # identical whichever endpoint NetworkX happened to label u vs v.
+    risk_sum = node_u.get("risk", 0.0) + node_v.get("risk", 0.0)
+    hub_sum = node_u.get("hub_score", 0.0) + node_v.get("hub_score", 0.0)
+
     return [
         1.0,  # bias term for the sigmoid linear predictor
-        node_u.get("risk", 0.0),
-        node_v.get("risk", 0.0),
-        node_u.get("hub_score", 0.0),
-        node_v.get("hub_score", 0.0),
-        edge_uv.get("interaction", 0.0),
-        float(node_u.get("community", 0) != node_v.get("community", 0)),
+        risk_sum,  # combined endpoint risk -- symmetric in u, v by construction
+        hub_sum,  # combined endpoint hub-ness -- symmetric in u, v by construction
+        edge_uv.get("interaction", 0.0),  # edge-level feature: already endpoint-order-independent
+        float(node_u.get("community", 0) != node_v.get("community", 0)),  # cross-community flag: != is symmetric already
     ]
 
 

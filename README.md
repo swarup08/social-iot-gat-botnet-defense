@@ -178,11 +178,10 @@ still buries the learned pipeline.
 
 The result is a genuine Pareto frontier, not a single winner: **degree-
 centrality gives the best containment at trivial cost** (0.0108s/graph,
-~3,595x cheaper than RL's 38.72s/graph), while **the greedy
+about 3,600x cheaper than RL's 38.72s/graph), while **the greedy
 simulation-guided heuristic buys the best security-utility balance**
-(frozen F1 0.634 vs. degree's 0.562) at ~4,216x degree's compute cost
-(45.41s/graph). Ratios are recomputed from the full-precision timing
-column in `harness_summary.csv` and used consistently wherever quoted.
+(frozen F1 0.634 vs. degree's 0.562) at about 4,200x degree's compute
+cost (45.41s/graph).
 Neither dominates the other, and the learned methods (GAT, RL) sit
 inside this frontier rather than on it. Degree-centrality is, in fact,
 the *only* structural method that holds both axes at once: eigenscore

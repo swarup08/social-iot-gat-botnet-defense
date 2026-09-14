@@ -29,7 +29,21 @@ from src.milestone1 import (
 )
 
 # Same beta used in Milestone 1's demo, so p_uv stays comparable across milestones.
-DEFAULT_BETA: List[float] = [-2.0, 1.5, -1.0, 0.8, 0.4, 0.7, 0.3]
+#
+# UPDATED (supervisor-flagged orientation-bug fix): phi() used to carry
+# node_u's and node_v's risk/hub_score as two SEPARATE entries with unequal
+# weights (1.5 vs -1.0 for risk, 0.8 vs 0.4 for hub) -- since graph.edges()
+# hands back an undirected edge in an arbitrary (u, v) orientation, this made
+# p_uv depend on which endpoint happened to be labelled u, which is wrong for
+# an undirected transmission edge. phi() now sums each endpoint pair instead
+# (risk_u + risk_v, hub_u + hub_v), so beta needs only ONE coefficient per
+# summed feature. Each new coefficient is the average of the old pair
+# (risk: (1.5 + -1.0) / 2 = 0.25; hub: (0.8 + 0.4) / 2 = 0.6), chosen so that
+# a "typical" edge with equal-risk endpoints produces the same linear-score
+# contribution as before -- i.e. this is a like-for-like de-biasing, not an
+# arbitrary new choice of magnitude.
+# Vector order now: [bias, risk_sum, hub_sum, interaction, community_mismatch]
+DEFAULT_BETA: List[float] = [-2.0, 0.25, 0.6, 0.7, 0.3]
 
 
 def generate_labeled_graph(
