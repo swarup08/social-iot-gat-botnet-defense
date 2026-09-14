@@ -57,6 +57,22 @@ def main() -> None:
     print(f"\n=== monitoring: STOP-before-budget, during training (behavior policy) ===")
     print(f"  episodes where the agent chose STOP before the removal budget: {n_stopped_early_during_training} / {N_EPISODES}")
 
+    # Supervisor-flagged fix: diagnose whether stopping early actually helped
+    # or hurt using the COMPLETE DISCOUNTED return (the agent's real
+    # objective, gamma-weighted like its Bellman target) -- not a plain
+    # undiscounted sum, which treats a step-1 reward and a step-15 reward as
+    # equally important when the agent itself does not.
+    stopped_returns = [g for g, stopped in zip(log["episode_discounted_return"], log["episode_stopped_early"]) if stopped]
+    continued_returns = [g for g, stopped in zip(log["episode_discounted_return"], log["episode_stopped_early"]) if not stopped]
+    print(f"\n=== monitoring: STOP vs. continue, complete discounted return ===")
+    if stopped_returns and continued_returns:
+        print(f"  mean discounted return, STOPPED-early episodes ({len(stopped_returns)}): {statistics.mean(stopped_returns):.3f}")
+        print(f"  mean discounted return, ran-to-budget episodes ({len(continued_returns)}): {statistics.mean(continued_returns):.3f}")
+    elif stopped_returns:
+        print(f"  all {len(stopped_returns)} episodes stopped early -- no ran-to-budget episodes to compare against")
+    else:
+        print("  no episodes stopped early -- no STOP-vs-continue discounted-return comparison possible")
+
     mean_return_last_20 = statistics.mean(log["episode_return"][-20:])
     mean_return_first_20 = statistics.mean(log["episode_return"][:20])
     print(f"\n=== training summary ===")

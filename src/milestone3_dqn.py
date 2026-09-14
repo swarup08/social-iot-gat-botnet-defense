@@ -165,6 +165,7 @@ def train_dqn(
     log: Dict[str, list] = {
         "episode_epsilon": [],
         "episode_return": [],
+        "episode_discounted_return": [],
         "episode_final_removed": [],
         "episode_reached_deep": [],
         "episode_stopped_early": [],
@@ -178,6 +179,17 @@ def train_dqn(
         epsilon = max(epsilon_end, epsilon_start - (epsilon_start - epsilon_end) * episode / epsilon_decay_episodes)
         state = env.reset()
         episode_return = 0.0
+        # Supervisor-flagged fix: episode_return above is a plain, UNDISCOUNTED
+        # sum -- it weighs a reward received on step 1 the same as one
+        # received on step 15, which is not how this agent's own objective
+        # (the gamma-discounted DQN Bellman target, see train_step above)
+        # values them. Diagnosing whether STOP-ing early helped or hurt an
+        # episode must use the SAME discounting the agent is actually
+        # optimizing for, or the diagnosis is answering a different question
+        # than "did the agent's actual objective improve." episode_rewards
+        # collects the raw per-step sequence so the proper discounted return
+        # (sum of gamma**i * r_i) can be computed once the episode ends.
+        episode_rewards: List[float] = []
         reached_deep = False
         first_deep_step: Optional[int] = None
         stopped_early = False
@@ -190,6 +202,7 @@ def train_dqn(
             next_state, reward, done, info = env.step(action)
             buffer.push(Transition(state, action, reward, next_state, done))
             episode_return += reward
+            episode_rewards.append(reward)
 
             if action == STOP_ACTION and info["cumulative_removed_fraction"] < env.max_removal_fraction:
                 stopped_early = True
@@ -210,8 +223,16 @@ def train_dqn(
         if episode % target_sync_every == 0:
             target_network.load_state_dict(q_network.state_dict())
 
+        # Complete discounted return G_0 = sum_i gamma**i * r_i over the WHOLE
+        # episode (computed once the episode is over, so every term's full
+        # discount weight is known) -- this is what "diagnose STOP behaviour
+        # using complete discounted returns" means: compare THIS number
+        # between stopped-early and ran-to-budget episodes, not the plain sum.
+        discounted_return = sum((gamma ** i) * r for i, r in enumerate(episode_rewards))
+
         log["episode_epsilon"].append(epsilon)
         log["episode_return"].append(episode_return)
+        log["episode_discounted_return"].append(discounted_return)
         log["episode_final_removed"].append(info["cumulative_removed_fraction"])
         log["episode_reached_deep"].append(reached_deep)
         log["episode_stopped_early"].append(stopped_early)

@@ -66,6 +66,19 @@ RL_EPISODES = 100
 RL_EPSILON_DECAY_EPISODES = 70
 MODEL_SEED = 0
 
+# Supervisor-flagged fix: PruningEnv's default infection_seed_base (7) is what
+# the RL agent's reward signal is computed from during every training step
+# (see src/milestone3.py). If the FINAL reported containment ratio also used
+# seed base 7, the RL policy would be graded on the exact same infection
+# realizations it was trained/rewarded against -- not an independent test.
+# This constant is therefore used for every method's FINAL measurement below
+# (measure()), deliberately disjoint from PruningEnv's training seed range
+# (7..7+n_rollouts-1 = 7..21), so RL's reported number reflects infection
+# rollouts it never saw during training. Applied uniformly to all 9 methods
+# (not just RL) so every method's Table 1 number comes from the same,
+# clearly-labeled held-out evaluation seed pool.
+EVAL_INFECTION_SEED_BASE = 10007
+
 METHODS = [
     "RL",
     "GAT threshold",
@@ -123,7 +136,18 @@ def run_one_graph(graph_seed: int) -> dict:
     edge_features = build_edge_features(graph)
     p_uv = compute_edge_infection_probabilities(graph, node_features, edge_features, beta=DEFAULT_BETA)
 
+    # Two separate baselines, deliberately: `baseline_infected` (default seed
+    # base 7) stays paired with PruningEnv's training-time reward signal
+    # below, unchanged. `baseline_infected_eval` uses the disjoint
+    # EVAL_INFECTION_SEED_BASE so that every method's FINAL containment_ratio
+    # (numerator AND denominator) is computed from the SAME held-out seed
+    # pool -- mixing a seed-7 baseline with a seed-10007 numerator would be
+    # an internally inconsistent ratio, not a fair fix.
     baseline_infected = {name: measure_security(graph, p_uv, node) for name, node in seed_nodes.items()}
+    baseline_infected_eval = {
+        name: measure_security(graph, p_uv, node, infection_seed_base=EVAL_INFECTION_SEED_BASE)
+        for name, node in seed_nodes.items()
+    }
 
     t_gat = time.time()
     base_model = train_gat(data, train_mask, model_seed=MODEL_SEED)
@@ -138,7 +162,10 @@ def run_one_graph(graph_seed: int) -> dict:
 
     def measure(method_name: str, pruned_graph_variants: list, elapsed: float) -> None:
         ratios = [
-            containment_ratio(measure_security(g, p_uv, node), baseline_infected[name])
+            containment_ratio(
+                measure_security(g, p_uv, node, infection_seed_base=EVAL_INFECTION_SEED_BASE),
+                baseline_infected_eval[name],  # same held-out seed pool as the numerator above
+            )
             for g in pruned_graph_variants
             for name, node in seed_nodes.items()
         ]

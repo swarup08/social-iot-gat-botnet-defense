@@ -13,7 +13,11 @@ from src.milestone1 import (
     simulate_botnet,
 )
 
-BETA = [-2.0, 1.5, -1.0, 0.8, 0.4, 0.7, 0.3]
+# Symmetric 5-coefficient beta matching the fixed _feature_vector (which now
+# sums each endpoint pair -- risk_u + risk_v, hub_u + hub_v -- instead of
+# giving u's and v's copies separate, unequal weights). Kept in sync with
+# DEFAULT_BETA in src/milestone2.py.
+BETA = [-2.0, 0.25, 0.6, 0.7, 0.3]
 
 
 def main() -> None:

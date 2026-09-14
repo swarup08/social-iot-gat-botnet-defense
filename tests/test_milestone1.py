@@ -30,7 +30,9 @@ class Milestone1Tests(unittest.TestCase):
         node_features = {0: {"risk": 0.9, "hub_score": 1.0, "community": 0}, 1: {"risk": 0.2, "hub_score": 0.3, "community": 0}}
         edge_features = {(0, 1): {"interaction": 0.8}}
 
-        probabilities = compute_edge_infection_probabilities(graph, node_features, edge_features, beta=[-2.0, 1.5, -1.0, 0.5, 0.3, 0.4, 0.8])
+        # 5-element beta matching the fixed, symmetric _feature_vector
+        # (bias, risk_sum, hub_sum, interaction, cross_community_flag).
+        probabilities = compute_edge_infection_probabilities(graph, node_features, edge_features, beta=[-2.0, 0.25, 0.6, 0.7, 0.3])
 
         self.assertIn((0, 1), probabilities)
         self.assertGreater(probabilities[(0, 1)], 0.0)
@@ -40,7 +42,8 @@ class Milestone1Tests(unittest.TestCase):
         graph = nx.path_graph(4)
         node_features = {node: {"risk": 0.5, "hub_score": 0.5, "community": 0} for node in graph.nodes}
         edge_features = {(u, v): {"interaction": 0.4} for u, v in graph.edges}
-        probabilities = compute_edge_infection_probabilities(graph, node_features, edge_features, beta=[-1.5, 0.8, 0.2, 0.1, 0.1, 0.0, 0.0])
+        # 5-element beta (bias, risk_sum, hub_sum, interaction, cross_community_flag).
+        probabilities = compute_edge_infection_probabilities(graph, node_features, edge_features, beta=[-1.5, 0.8, 0.2, 0.1, 0.1])
 
         result = simulate_botnet(graph, probabilities, initial_compromised={0}, seed=11)
 
@@ -59,7 +62,8 @@ class Milestone1Tests(unittest.TestCase):
         # A large bias with all other weights zeroed drives every p_uv to
         # sigmoid(50), which rounds to exactly 1.0 in float64 -- so every
         # edge trial is guaranteed to succeed and the rollout is deterministic.
-        probabilities = compute_edge_infection_probabilities(graph, node_features, edge_features, beta=[50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        # 5-element beta (bias, risk_sum, hub_sum, interaction, cross_community_flag).
+        probabilities = compute_edge_infection_probabilities(graph, node_features, edge_features, beta=[50.0, 0.0, 0.0, 0.0, 0.0])
 
         result = simulate_botnet(graph, probabilities, initial_compromised={0}, seed=1)
 
@@ -103,8 +107,11 @@ class Milestone1Tests(unittest.TestCase):
         node_features = build_node_features(graph)
         edge_features = build_edge_features(graph)
 
+        # Symmetric 5-coefficient beta matching the fixed _feature_vector (sums
+        # each endpoint pair instead of giving u/v separate, unequal weights);
+        # kept in sync with DEFAULT_BETA in src/milestone2.py.
         probabilities = compute_edge_infection_probabilities(
-            graph, node_features, edge_features, beta=[-2.0, 1.5, -1.0, 0.8, 0.4, 0.7, 0.3]
+            graph, node_features, edge_features, beta=[-2.0, 0.25, 0.6, 0.7, 0.3]
         )
 
         self.assertEqual(len(probabilities), graph.number_of_edges())

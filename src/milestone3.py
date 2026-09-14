@@ -117,6 +117,7 @@ class PruningEnv:
         w_utility: float = 1.0,
         w_cost: float = 0.1,
         n_rollouts: int = 15,
+        infection_seed_base: int = 7,
     ):
         self.original_graph = graph
         self.node_features = node_features
@@ -136,6 +137,17 @@ class PruningEnv:
         self.w_utility = w_utility
         self.w_cost = w_cost
         self.n_rollouts = n_rollouts
+        # Supervisor-flagged fix: this seed base is used ONLY for the reward
+        # signal the RL agent trains on (every env.step() during training
+        # calls _measure_current, below). The harness's FINAL reported
+        # containment ratio for every method -- including RL -- must be
+        # measured with a DIFFERENT, disjoint seed base (see
+        # demo_milestone4_harness.py's EVAL_INFECTION_SEED_BASE), so the
+        # policy is graded on infection realizations it never saw or was
+        # rewarded against during training. Keeping this as a named,
+        # overridable field (rather than always relying on measure_security's
+        # own default) makes that separation explicit and auditable.
+        self.infection_seed_base = infection_seed_base
 
         self.bucket_of = assign_attention_buckets(gat_scores, N_BUCKETS)
         self.bucket_original_counts = [0] * N_BUCKETS
@@ -173,7 +185,11 @@ class PruningEnv:
         CURRENT working_graph."""
         ratios = []
         for name, node in self.seed_nodes.items():
-            infected = measure_security(self.working_graph, self.p_uv, node, n_rollouts=self.n_rollouts)
+            infected = measure_security(
+                self.working_graph, self.p_uv, node,
+                n_rollouts=self.n_rollouts,
+                infection_seed_base=self.infection_seed_base,  # training-time reward seeds, kept separate from final-report seeds
+            )
             ratios.append(containment_ratio(infected, self.baseline_infected[name]))
         mean_containment = statistics.mean(ratios)
 
