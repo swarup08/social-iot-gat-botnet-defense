@@ -107,7 +107,7 @@ class PruningEnv:
         seed_nodes: Dict[str, int],
         gat_scores: Dict[Tuple[int, int], float],
         base_model: GATNodeClassifier,
-        test_mask: torch.Tensor,
+        reward_mask: torch.Tensor,
         baseline_infected: Dict[str, float],
         baseline_utility: Dict[str, float],
         max_steps: int = 15,
@@ -126,7 +126,14 @@ class PruningEnv:
         self.seed_nodes = seed_nodes
         self.gat_scores = gat_scores
         self.base_model = base_model
-        self.test_mask = test_mask
+        # Supervisor-flagged fix: this must be a mask DISJOINT from whatever
+        # mask is used to report the final, post-training frozen_recall/
+        # frozen_f1 in Table 1 (demo_milestone4_harness.py uses val_mask
+        # here and reserves test_mask for that final report) -- otherwise
+        # the "held-out test set" reported for RL was actually used as
+        # reward signal during training, the node-classification-label
+        # analogue of the already-fixed infection-seed leakage.
+        self.reward_mask = reward_mask
         self.baseline_infected = baseline_infected
         self.baseline_utility = baseline_utility
 
@@ -193,7 +200,7 @@ class PruningEnv:
             ratios.append(containment_ratio(infected, self.baseline_infected[name]))
         mean_containment = statistics.mean(ratios)
 
-        utility = measure_utility_frozen(self.base_model, self.working_graph, self.node_features, self.labels, self.test_mask)
+        utility = measure_utility_frozen(self.base_model, self.working_graph, self.node_features, self.labels, self.reward_mask)
         utility_ratio = utility["recall"] / max(self.baseline_utility["recall"], 1e-6)
         return mean_containment, utility_ratio
 
@@ -337,7 +344,12 @@ def build_pruning_env(n_nodes: int = 300, model_seed: int = 0, **env_kwargs) -> 
     gat_scores = extract_degree_corrected_attention_scores(base_model, data, graph)
 
     baseline_infected = {name: measure_security(graph, p_uv, node) for name, node in seed_nodes.items()}
-    baseline_utility = measure_utility_frozen(base_model, graph, node_features, labels, test_mask)
+    # Supervisor-flagged fix: the reward-time utility baseline must be
+    # measured on a mask disjoint from test_mask, since test_mask is what
+    # a caller would use to report a genuinely held-out final evaluation
+    # (see demo_milestone4_harness.py's baseline_utility vs.
+    # baseline_utility_reward split for the analogous fix there).
+    baseline_utility_reward = measure_utility_frozen(base_model, graph, node_features, labels, val_mask)
 
     return PruningEnv(
         graph=graph,
@@ -347,8 +359,8 @@ def build_pruning_env(n_nodes: int = 300, model_seed: int = 0, **env_kwargs) -> 
         seed_nodes=seed_nodes,
         gat_scores=gat_scores,
         base_model=base_model,
-        test_mask=test_mask,
+        reward_mask=val_mask,
         baseline_infected=baseline_infected,
-        baseline_utility=baseline_utility,
+        baseline_utility=baseline_utility_reward,
         **env_kwargs,
     )

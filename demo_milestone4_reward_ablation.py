@@ -98,6 +98,14 @@ def run_one_graph(graph_seed: int) -> dict:
 
     base_model = train_gat(data, train_mask, model_seed=MODEL_SEED)
     baseline_utility = measure_utility_frozen(base_model, graph, node_features, labels, test_mask)
+    # Supervisor-flagged fix (same as demo_milestone4_harness.py): PruningEnv's
+    # reward signal must be measured on a mask disjoint from test_mask, since
+    # test_mask is what measure() below uses to report every method's FINAL
+    # frozen_recall/frozen_f1 -- reusing test_mask for RL's reward would mean
+    # its "held-out" test set was actually seen as reward signal during
+    # training. val_mask (already split out by make_node_split, previously
+    # unused here) is the correct, disjoint mask for this.
+    baseline_utility_reward = measure_utility_frozen(base_model, graph, node_features, labels, val_mask)
     gat_scores = extract_degree_corrected_attention_scores(base_model, data, graph)
 
     results = {}
@@ -152,9 +160,9 @@ def run_one_graph(graph_seed: int) -> dict:
             seed_nodes=seed_nodes,
             gat_scores=gat_scores,
             base_model=base_model,
-            test_mask=test_mask,
+            reward_mask=val_mask,
             baseline_infected=baseline_infected,
-            baseline_utility=baseline_utility,
+            baseline_utility=baseline_utility_reward,
             max_steps=15,
             max_removal_fraction=TARGET_LEVEL,
             chunk_fraction=0.05,
