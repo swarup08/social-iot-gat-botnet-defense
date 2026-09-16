@@ -205,7 +205,7 @@ def main() -> None:
         f"of a precomputed score, reported here per this project's standard for expensive methods."
     )
 
-    plot_path = plot_containment_ratio_vs_pruning_level(results)
+    plot_path = plot_containment_ratio_vs_pruning_level(results, output_path="containment_ratio_vs_pruning_level_fixed.pdf")
     print(f"\nsaved trade-off plot to {plot_path}")
 
     utility_plot_path = plot_utility_vs_pruning_level(results)

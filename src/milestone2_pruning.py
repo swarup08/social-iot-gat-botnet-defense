@@ -447,7 +447,7 @@ def plot_containment_ratio_vs_pruning_level(results: List[Dict], output_path: st
     plt.xlabel("fraction of edges removed (pruning level)")
     plt.ylabel("containment ratio (infected_pruned / infected_unpruned)")
     plt.title("Security/utility trade-off: containment ratio vs. pruning level")
-    plt.legend(fontsize=8, loc="upper right")
+    plt.legend(fontsize=10, loc="upper right")
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
@@ -544,7 +544,7 @@ def plot_containment_vs_utility_tradeoff(rows: List[Dict], output_path: str = "c
             (x, y),
             textcoords="offset points",
             xytext=(6, y_offset),
-            fontsize=8,
+            fontsize=11,
         )
 
     plt.xlabel("containment ratio (lower = more contained)")

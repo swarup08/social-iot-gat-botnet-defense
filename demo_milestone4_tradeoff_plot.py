@@ -31,7 +31,7 @@ def load_summary_rows(path: str) -> list:
 
 def main() -> None:
     rows = load_summary_rows(SUMMARY_CSV_PATH)
-    output_path = plot_containment_vs_utility_tradeoff(rows, output_path="containment_vs_utility_tradeoff.png")
+    output_path = plot_containment_vs_utility_tradeoff(rows, output_path="containment_vs_utility_tradeoff_v2.pdf")
     print(f"saved {output_path} ({len(rows)} methods plotted from {SUMMARY_CSV_PATH})")
 
 
