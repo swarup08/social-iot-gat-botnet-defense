@@ -291,6 +291,32 @@ def main() -> None:
     summary_path = save_table_csv(summary_rows, "harness_summary.csv")
     print(f"saved per-method summary table to {summary_path}")
 
+    # Per-reviewer request: release the raw per-graph containment_ratio
+    # values behind harness_summary.csv's aggregated mean/std, so the paper
+    # can publish per-graph paired outcomes for reproducibility. One row
+    # per (graph_seed, method); all_results[method][metric] lists are
+    # appended once per graph_seed in ascending order inside the main loop
+    # above, so index i always corresponds to graph_seed=i.
+    per_graph_rows = []
+    for method in METHODS:
+        c = all_results[method]["containment_ratio"]
+        r = all_results[method]["frozen_recall"]
+        f = all_results[method]["frozen_f1"]
+        t = all_results[method]["time"]
+        for graph_seed in range(N_GRAPHS):
+            per_graph_rows.append(
+                {
+                    "graph_seed": graph_seed,
+                    "method": method,
+                    "containment_ratio": c[graph_seed],
+                    "frozen_recall": r[graph_seed],
+                    "frozen_f1": f[graph_seed],
+                    "time_s": t[graph_seed],
+                }
+            )
+    per_graph_path = save_table_csv(per_graph_rows, "harness_per_graph.csv")
+    print(f"saved per-graph raw results table to {per_graph_path} ({len(per_graph_rows)} rows)")
+
     print(f"\n=== {len(PAIRS)} curated paired significance tests, Holm-corrected (alpha=0.05) ===")
     comparisons = run_paired_tests_with_correction(PAIRS, {m: all_results[m]["containment_ratio"] for m in METHODS})
     print(f"{'A vs B':<45}{'mean_A':>8}{'mean_B':>8}{'diff':>8}{'raw_p':>10}{'holm_p':>10}{'sig?':>6}")
