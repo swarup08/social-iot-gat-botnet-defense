@@ -269,6 +269,77 @@ def greedy_simulation_guided_prune(
     return checkpoints
 
 
+def greedy_simulation_guided_prune_normalized(
+    graph: nx.Graph,
+    p_uv: Dict[Tuple[int, int], float],
+    seed_nodes: Dict[str, int],
+    baseline_infected: Dict[str, float],
+    max_remove_fraction: float,
+    checkpoint_fractions: List[float],
+    search_rollouts: int = 1,
+    epsilon: float = 0.01,
+) -> Dict[float, nx.Graph]:
+    """Reviewer-requested control variant of greedy_simulation_guided_prune():
+    that function scores each candidate by SUMMING raw, un-normalized
+    infected fractions across seed nodes, which implicitly overweights
+    whichever seed node has the largest absolute infection numbers
+    (typically the hub) -- an objective mismatch with containment_ratio(),
+    the metric every reported result (including this method's own Table 1
+    row) is actually evaluated on. That mismatch is a plausible alternative
+    explanation for the myopia diagnostic's "more rollouts -> worse
+    containment" finding (demo_milestone2_greedy_myopia_diagnostic.py /
+    NOTES.md's 2026-07-11 n=10 entry): a noisier 1-rollout signal could
+    coincidentally correlate better with the (normalized) evaluation metric
+    than a more accurate but differently-scaled 5-rollout SUM does.
+
+    This variant instead scores each candidate by AVERAGING per-(seed_node,
+    rollout) containment ratios -- infected_fraction / max(baseline_infected
+    [seed_name], epsilon), the SAME normalization and epsilon floor as
+    containment_ratio() -- aligning the search objective with the evaluation
+    metric. Deliberately NOT a replacement for greedy_simulation_guided_prune()
+    (which remains the Table 1 / harness version used everywhere else in the
+    paper) -- this exists solely to test whether the myopia conclusion
+    survives under an aligned objective; see
+    demo_milestone2_greedy_myopia_diagnostic_normalized.py.
+
+    See greedy_simulation_guided_prune()'s docstring for the shared mechanics
+    (in-place remove/restore during the search, one incremental removal
+    sequence reused across every checkpoint_fractions level, compute cost).
+    """
+    working_graph = graph.copy()
+    total_edges = graph.number_of_edges()
+    max_removals = round(max_remove_fraction * total_edges)
+    removals_at_checkpoint = {round(fraction * total_edges): fraction for fraction in checkpoint_fractions}
+
+    checkpoints: Dict[float, nx.Graph] = {}
+    for step in range(1, max_removals + 1):
+        best_edge, best_score = None, None
+        for u, v in list(working_graph.edges()):
+            edge_attrs = working_graph.get_edge_data(u, v)
+            working_graph.remove_edge(u, v)
+
+            ratios = []
+            for seed_name, seed_node in seed_nodes.items():
+                baseline = max(baseline_infected[seed_name], epsilon)
+                for rollout in range(search_rollouts):
+                    result = simulate_botnet(working_graph, p_uv, initial_compromised={seed_node}, seed=rollout)
+                    infected_fraction = len(result["infected_nodes"]) / working_graph.number_of_nodes()
+                    ratios.append(infected_fraction / baseline)
+            mean_ratio = statistics.mean(ratios)
+
+            working_graph.add_edge(u, v, **edge_attrs)  # restore before testing the next candidate
+
+            if best_score is None or mean_ratio < best_score:
+                best_score, best_edge = mean_ratio, (u, v)
+
+        working_graph.remove_edge(*best_edge)  # commit the best candidate from this step
+
+        if step in removals_at_checkpoint:
+            checkpoints[removals_at_checkpoint[step]] = working_graph.copy()
+
+    return checkpoints
+
+
 def measure_security_and_utility(
     original_graph: nx.Graph,
     pruned_graph: nx.Graph,
