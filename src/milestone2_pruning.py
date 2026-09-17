@@ -31,9 +31,23 @@ import random
 import statistics
 from typing import Dict, List, Tuple
 
+import matplotlib
+
+# Force the non-interactive Agg backend: this module only ever calls
+# savefig(), never shows a GUI window, and adjust_text() (below) triggers a
+# canvas.draw() per call -- under the default (Tk-based) backend on this
+# machine, repeated draws across a full test run intermittently corrupt Tcl
+# interpreter state (a broken/incomplete local Tcl install, confirmed via
+# TclError: "couldn't read file init.tcl"), causing flaky, order-dependent
+# test failures unrelated to any actual plotting bug. Must be set before
+# pyplot is imported.
+matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 import networkx as nx
 import torch
+from adjustText import adjust_text
+from matplotlib.transforms import Bbox
 
 from src.milestone1 import simulate_botnet
 from src.milestone2 import accuracy, build_pyg_data, precision_recall_f1_counts, train_gat
@@ -526,10 +540,11 @@ def plot_containment_vs_utility_tradeoff(rows: List[Dict], output_path: str = "c
     ys = [row["frozen_f1_mean"] for row in rows]
     x_errs = [row.get("containment_ratio_std", 0.0) for row in rows]
     y_errs = [row.get("frozen_f1_std", 0.0) for row in rows]
-    x_range = (max(xs) - min(xs)) or 1.0
-    y_range = (max(ys) - min(ys)) or 1.0
 
     plt.figure(figsize=(8, 6))
+    ax = plt.gca()
+    texts = []
+    avoid_objects = []
     for i, row in enumerate(rows):
         x, y = xs[i], ys[i]
         plt.errorbar(
@@ -544,26 +559,39 @@ def plot_containment_vs_utility_tradeoff(rows: List[Dict], output_path: str = "c
             alpha=0.85,
             zorder=3,
         )
-        # Points that land close together in this (very different-scale) 2D
-        # space -- e.g. eigenscore vs. betweenness-centrality -- would
-        # otherwise render overlapping text. For each point, count how many
-        # EARLIER points are within 5% of the axis range in both dimensions
-        # and push the label progressively further below the marker for
-        # each one found, so a cluster's labels stack readably instead of
-        # overlapping.
-        close_count = sum(
-            1
-            for j in range(i)
-            if abs(x - xs[j]) / x_range < 0.05 and abs(y - ys[j]) / y_range < 0.05
+        # Build an explicit avoidance region for this point's error-bar
+        # cross (the rectangle spanning [x-xerr, x+xerr] x [y-yerr, y+yerr])
+        # so adjustText (below) routes labels around the RENDERED ERROR
+        # BARS too, not just the marker points -- a fixed close-point label
+        # offset isn't enough once whiskers add visual extent in an
+        # already-crowded cluster (e.g. degree-centrality/GAT top-k/
+        # betweenness-centrality/eigenscore, all near containment_ratio~0.03).
+        # NOTE: matplotlib's errorbar() cap/bar LineCollection artists
+        # return a degenerate all-inf get_window_extent() in this matplotlib
+        # version (verified directly), which crashes adjustText's internal
+        # KDTree on non-finite values -- so this rectangle is computed and
+        # transformed to display coordinates by hand instead of passing
+        # those LineCollection objects straight through.
+        data_bbox = Bbox.from_extents(x - x_errs[i], y - y_errs[i], x + x_errs[i], y + y_errs[i])
+        avoid_objects.append(ax.transData.transform_bbox(data_bbox))
+
+        texts.append(
+            plt.text(x, y, f"{row['method']}\n({row['mean_time_s']:.2f}s)", fontsize=11)
         )
-        y_offset = 6 - close_count * 24
-        plt.annotate(
-            f"{row['method']}\n({row['mean_time_s']:.2f}s)",
-            (x, y),
-            textcoords="offset points",
-            xytext=(6, y_offset),
-            fontsize=11,
-        )
+
+    # Auto-place all 9 labels to avoid overlapping each other, the marker
+    # points, and the error-bar whiskers/caps collected above -- replaces a
+    # simpler fixed-offset stacking heuristic that broke down once error
+    # bars were added (see git history). Draws thin leader lines from each
+    # final label position back to its point so a label that had to move
+    # far to avoid a collision is still traceable to its marker.
+    adjust_text(
+        texts,
+        x=xs,
+        y=ys,
+        objects=avoid_objects,
+        arrowprops=dict(arrowstyle="-", color="gray", lw=0.6, alpha=0.7),
+    )
 
     plt.xlabel("containment ratio (lower = more contained)")
     plt.ylabel("frozen F1 (compromised class, higher = better utility)")

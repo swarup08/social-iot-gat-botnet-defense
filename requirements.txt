@@ -4,3 +4,4 @@ matplotlib
 torch
 torch-geometric
 scipy
+adjustText
