@@ -509,23 +509,41 @@ def plot_containment_vs_utility_tradeoff(rows: List[Dict], output_path: str = "c
     better core-task utility), each point labeled with its method name and
     mean compute cost (mean_time_s) -- so the plot shows all three axes this
     project cares about (security, utility, cost) at once, at a glance.
+    Horizontal/vertical error bars show seed-to-seed (across-graph) spread in
+    each dimension, per reviewer request, when std columns are provided.
 
     `rows` is a list of dicts, one per method, needing "method",
     "containment_ratio_mean", "frozen_f1_mean", "mean_time_s" keys -- exactly
-    harness_summary.csv's row shape (read via csv.DictReader).
+    harness_summary.csv's row shape (read via csv.DictReader). Optional
+    "containment_ratio_std"/"frozen_f1_std" keys (missing -> 0, no error bar
+    drawn in that dimension) draw the x/y error bars; existing callers/tests
+    that don't pass these keys are unaffected.
     """
     colors = plt.cm.tab10.colors
     markers = ["o", "s", "^", "D", "v", "P", "X", "*", "h"]
 
     xs = [row["containment_ratio_mean"] for row in rows]
     ys = [row["frozen_f1_mean"] for row in rows]
+    x_errs = [row.get("containment_ratio_std", 0.0) for row in rows]
+    y_errs = [row.get("frozen_f1_std", 0.0) for row in rows]
     x_range = (max(xs) - min(xs)) or 1.0
     y_range = (max(ys) - min(ys)) or 1.0
 
     plt.figure(figsize=(8, 6))
     for i, row in enumerate(rows):
         x, y = xs[i], ys[i]
-        plt.scatter(x, y, color=colors[i % len(colors)], marker=markers[i % len(markers)], s=70, zorder=3)
+        plt.errorbar(
+            x, y,
+            xerr=x_errs[i], yerr=y_errs[i],
+            fmt=markers[i % len(markers)],
+            color=colors[i % len(colors)],
+            ecolor=colors[i % len(colors)],
+            elinewidth=1.2,
+            capsize=4,
+            markersize=9,
+            alpha=0.85,
+            zorder=3,
+        )
         # Points that land close together in this (very different-scale) 2D
         # space -- e.g. eigenscore vs. betweenness-centrality -- would
         # otherwise render overlapping text. For each point, count how many
