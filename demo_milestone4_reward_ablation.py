@@ -48,6 +48,7 @@ from src.milestone2_pruning import (
 )
 from src.milestone3 import PruningEnv
 from src.milestone3_dqn import run_greedy_episode, train_dqn
+from src.milestone3_xai import save_table_csv
 from src.milestone4 import EVAL_INFECTION_SEED_BASE, run_paired_tests_with_correction
 
 N_GRAPHS = 40
@@ -121,7 +122,7 @@ def run_one_graph(graph_seed: int) -> dict:
 
     results = {}
 
-    def measure(method_name: str, pruned_graph_variants: list, elapsed: float) -> None:
+    def measure(method_name: str, pruned_graph_variants: list, elapsed: float, stopped_early=None) -> None:
         ratios = [
             containment_ratio(
                 measure_security(g, p_uv, node, infection_seed_base=EVAL_INFECTION_SEED_BASE),
@@ -131,11 +132,21 @@ def run_one_graph(graph_seed: int) -> dict:
             for name, node in seed_nodes.items()
         ]
         frozen_list = [measure_utility_frozen(base_model, g, node_features, labels, test_mask) for g in pruned_graph_variants]
+        # Reviewer-requested (raw-data release, tab:reward): removal_fraction
+        # is purely structural (edge counts of graphs already computed above,
+        # no randomness) -- averaged across variants the same way containment/
+        # frozen metrics already are. stopped_early is only meaningful for the
+        # RL config rows (the 6 static/GAT/random methods aren't sequential),
+        # passed in by the caller from run_greedy_episode's own return value
+        # (already computed there, previously just discarded).
+        removal_fractions = [1 - g.number_of_edges() / graph.number_of_edges() for g in pruned_graph_variants]
         results[method_name] = {
             "containment_ratio": statistics.mean(ratios),
             "frozen_recall": statistics.mean(f["recall"] for f in frozen_list),
             "frozen_f1": statistics.mean(f["f1"] for f in frozen_list),
             "time": elapsed,
+            "removal_fraction": statistics.mean(removal_fractions),
+            "stopped_early": stopped_early,
         }
 
     t = time.time()
@@ -183,15 +194,16 @@ def run_one_graph(graph_seed: int) -> dict:
             **weights,
         )
         q_network, _ = train_dqn(env, n_episodes=RL_EPISODES, epsilon_decay_episodes=RL_EPSILON_DECAY_EPISODES, seed=0)
-        run_greedy_episode(env, q_network)
+        greedy_result = run_greedy_episode(env, q_network)
         rl_graph = env.working_graph.copy()
-        measure(config_name, [rl_graph], time.time() - t)
+        measure(config_name, [rl_graph], time.time() - t, stopped_early=greedy_result["stopped_early"])
 
     return results
 
 
 def main() -> None:
     all_results = {m: {"containment_ratio": [], "frozen_recall": [], "frozen_f1": [], "time": []} for m in ALL_METHODS}
+    per_graph_rows = []  # reviewer-requested raw-data release (tab:reward): one row per (graph_seed, method)
 
     harness_start = time.time()
     for graph_seed in range(N_GRAPHS):
@@ -202,10 +214,25 @@ def main() -> None:
             all_results[m]["frozen_recall"].append(results[m]["frozen_recall"])
             all_results[m]["frozen_f1"].append(results[m]["frozen_f1"])
             all_results[m]["time"].append(results[m]["time"])
+            per_graph_rows.append(
+                {
+                    "graph_seed": graph_seed,
+                    "method": m,
+                    "containment_ratio": results[m]["containment_ratio"],
+                    "frozen_recall": results[m]["frozen_recall"],
+                    "frozen_f1": results[m]["frozen_f1"],
+                    "time_s": results[m]["time"],
+                    "removal_fraction": results[m]["removal_fraction"],
+                    "stopped_early": results[m]["stopped_early"],
+                }
+            )
         print(f"graph {graph_seed:2d}/{N_GRAPHS} done in {time.time() - graph_start:.1f}s (total elapsed {time.time() - harness_start:.0f}s)", flush=True)
 
     total_elapsed = time.time() - harness_start
     print(f"\nablation complete: {N_GRAPHS} graphs in {total_elapsed:.0f}s ({total_elapsed / N_GRAPHS:.1f}s/graph average)")
+
+    per_graph_csv_path = save_table_csv(per_graph_rows, "reward_ablation_per_graph.csv")
+    print(f"saved per-graph raw results to {per_graph_csv_path} ({len(per_graph_rows)} rows)")
 
     print("\n=== per-method mean +/- std across 40 graphs ===")
     print(f"{'method':<50}{'containment_ratio':>20}{'frozen_recall':>16}{'frozen_f1':>12}{'mean_time_s':>13}")

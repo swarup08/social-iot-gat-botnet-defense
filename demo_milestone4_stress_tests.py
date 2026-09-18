@@ -45,6 +45,7 @@ from src.milestone2_pruning import (
 )
 from src.milestone3 import PruningEnv
 from src.milestone3_dqn import run_greedy_episode, train_dqn
+from src.milestone3_xai import save_table_csv
 from src.milestone4 import EVAL_INFECTION_SEED_BASE, run_paired_tests_with_correction
 
 N_GRAPHS = 15
@@ -109,7 +110,7 @@ def run_one_graph(graph_seed: int, n_nodes: int, m: int, beta: list) -> dict:
 
     results = {}
 
-    def measure(method_name: str, pruned_graph_variants: list) -> None:
+    def measure(method_name: str, pruned_graph_variants: list, stopped_early=None) -> None:
         ratios = [
             containment_ratio(
                 measure_security(g, p_uv, node, infection_seed_base=EVAL_INFECTION_SEED_BASE),
@@ -119,9 +120,19 @@ def run_one_graph(graph_seed: int, n_nodes: int, m: int, beta: list) -> dict:
             for name, node in seed_nodes.items()
         ]
         frozen_list = [measure_utility_frozen(base_model, g, node_features, labels, test_mask) for g in pruned_graph_variants]
+        # Reviewer-requested (raw-data release, tab:stress/tab:aggressiveness):
+        # removal_fraction is purely structural (edge counts of graphs already
+        # computed above, no randomness) -- averaged across variants the same
+        # way containment/frozen metrics already are. stopped_early is only
+        # meaningful for the RL row (the 6 static/GAT/random methods aren't
+        # sequential), passed in by the caller from run_greedy_episode's own
+        # return value (already computed there, previously just discarded).
+        removal_fractions = [1 - g.number_of_edges() / graph.number_of_edges() for g in pruned_graph_variants]
         results[method_name] = {
             "containment_ratio": statistics.mean(ratios),
             "frozen_f1": statistics.mean(f["f1"] for f in frozen_list),
+            "removal_fraction": statistics.mean(removal_fractions),
+            "stopped_early": stopped_early,
         }
 
     g = prune_lowest_score(graph, gat_scores, TARGET_LEVEL)
@@ -163,21 +174,33 @@ def run_one_graph(graph_seed: int, n_nodes: int, m: int, beta: list) -> dict:
         w_cost=0.1,
     )
     q_network, _ = train_dqn(env, n_episodes=RL_EPISODES, epsilon_decay_episodes=RL_EPSILON_DECAY_EPISODES, seed=0)
-    run_greedy_episode(env, q_network)
+    greedy_result = run_greedy_episode(env, q_network)
     rl_graph = env.working_graph.copy()
-    measure(RL_NAME, [rl_graph])
+    measure(RL_NAME, [rl_graph], stopped_early=greedy_result["stopped_early"])
 
     return results
 
 
 def run_condition(condition_name: str, n_nodes: int, m: int, beta: list) -> dict:
     all_results = {m_name: {"containment_ratio": [], "frozen_f1": []} for m_name in ALL_METHODS}
+    per_graph_rows = []  # reviewer-requested raw-data release (tab:stress/tab:aggressiveness)
     cond_start = time.time()
     for graph_seed in range(N_GRAPHS):
         results = run_one_graph(graph_seed, n_nodes, m, beta)
         for m_name in ALL_METHODS:
             all_results[m_name]["containment_ratio"].append(results[m_name]["containment_ratio"])
             all_results[m_name]["frozen_f1"].append(results[m_name]["frozen_f1"])
+            per_graph_rows.append(
+                {
+                    "condition": condition_name,
+                    "graph_seed": graph_seed,
+                    "method": m_name,
+                    "containment_ratio": results[m_name]["containment_ratio"],
+                    "frozen_f1": results[m_name]["frozen_f1"],
+                    "removal_fraction": results[m_name]["removal_fraction"],
+                    "stopped_early": results[m_name]["stopped_early"],
+                }
+            )
     elapsed = time.time() - cond_start
     print(f"\n--- {condition_name} done in {elapsed:.0f}s ({elapsed / N_GRAPHS:.1f}s/graph) ---", flush=True)
 
@@ -194,15 +217,23 @@ def run_condition(condition_name: str, n_nodes: int, m: int, beta: list) -> dict
         label = f"{c['method_a']} vs {c['method_b']}"
         print(f"{label:<30}{c['mean_a']:>8.3f}{c['mean_b']:>8.3f}{c['mean_diff']:>8.3f}{c['p_value']:>10.4f}{c['p_value_holm']:>10.4f}{str(c['significant_holm']):>6}")
 
-    return {"all_results": all_results, "comparisons": comparisons}
+    return {"all_results": all_results, "comparisons": comparisons, "per_graph_rows": per_graph_rows}
 
 
 def main() -> None:
     overall_start = time.time()
+    all_per_graph_rows = []
     for condition_name, params in CONDITIONS.items():
         print(f"\n\n=== running condition: {condition_name} ===", flush=True)
-        run_condition(condition_name, **params)
+        condition_result = run_condition(condition_name, **params)
+        all_per_graph_rows.extend(condition_result["per_graph_rows"])
     print(f"\n\nALL CONDITIONS COMPLETE in {time.time() - overall_start:.0f}s")
+
+    per_graph_csv_path = save_table_csv(all_per_graph_rows, "stress_tests_per_graph.csv")
+    print(f"saved per-graph raw results to {per_graph_csv_path} ({len(all_per_graph_rows)} rows) -- "
+          f"covers both tab:stress (size_small/size_large/density_sparse/density_dense conditions) "
+          f"and tab:aggressiveness (aggressive_moderate/aggressive_high conditions)")
+
     print("No further interpretation forced here -- see NOTES.md for the read-through.")
 
 
