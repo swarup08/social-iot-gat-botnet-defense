@@ -67,6 +67,7 @@ from src.milestone2_pruning import (
     score_edges_by_avg_hub_score,
     score_edges_by_betweenness,
 )
+from src.milestone3_xai import save_table_csv
 
 N_NODES = 300
 PRUNING_LEVELS = [0.10, 0.25, 0.50]
@@ -204,6 +205,9 @@ def main() -> None:
         f"~0.01s per structural/attention method -- the cost of looking at simulate_botnet outcomes directly instead "
         f"of a precomputed score, reported here per this project's standard for expensive methods."
     )
+
+    csv_path = save_table_csv(results, "pruning_level_sweep.csv")
+    print(f"\nsaved underlying sweep data to {csv_path}")
 
     plot_path = plot_containment_ratio_vs_pruning_level(results, output_path="containment_ratio_vs_pruning_level_fixed.pdf")
     print(f"\nsaved trade-off plot to {plot_path}")

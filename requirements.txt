@@ -1,7 +1,7 @@
-numpy
-networkx
-matplotlib
-torch
-torch-geometric
-scipy
-adjustText
+numpy==2.2.0
+networkx==3.5
+matplotlib==3.10.7
+torch==2.9.1+cpu
+torch-geometric==2.7.0
+scipy==1.16.3
+adjustText==1.4.0
