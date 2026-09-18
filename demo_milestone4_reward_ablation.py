@@ -48,7 +48,7 @@ from src.milestone2_pruning import (
 )
 from src.milestone3 import PruningEnv
 from src.milestone3_dqn import run_greedy_episode, train_dqn
-from src.milestone4 import run_paired_tests_with_correction
+from src.milestone4 import EVAL_INFECTION_SEED_BASE, run_paired_tests_with_correction
 
 N_GRAPHS = 40
 TARGET_LEVEL = 0.50
@@ -94,7 +94,18 @@ def run_one_graph(graph_seed: int) -> dict:
 
     edge_features = build_edge_features(graph)
     p_uv = compute_edge_infection_probabilities(graph, node_features, edge_features, beta=DEFAULT_BETA)
+    # Two separate baselines, deliberately (same pattern as demo_milestone4_harness.py):
+    # `baseline_infected` (default seed base 7) stays paired with PruningEnv's
+    # training-time reward signal below, unchanged. `baseline_infected_eval`
+    # uses the disjoint EVAL_INFECTION_SEED_BASE so that every method's FINAL
+    # containment_ratio (numerator AND denominator) is computed from the SAME
+    # held-out seed pool -- mixing a seed-7 baseline with a seed-10007
+    # numerator would be an internally inconsistent ratio, not a fair fix.
     baseline_infected = {name: measure_security(graph, p_uv, node) for name, node in seed_nodes.items()}
+    baseline_infected_eval = {
+        name: measure_security(graph, p_uv, node, infection_seed_base=EVAL_INFECTION_SEED_BASE)
+        for name, node in seed_nodes.items()
+    }
 
     base_model = train_gat(data, train_mask, model_seed=MODEL_SEED)
     baseline_utility = measure_utility_frozen(base_model, graph, node_features, labels, test_mask)
@@ -112,7 +123,10 @@ def run_one_graph(graph_seed: int) -> dict:
 
     def measure(method_name: str, pruned_graph_variants: list, elapsed: float) -> None:
         ratios = [
-            containment_ratio(measure_security(g, p_uv, node), baseline_infected[name])
+            containment_ratio(
+                measure_security(g, p_uv, node, infection_seed_base=EVAL_INFECTION_SEED_BASE),
+                baseline_infected_eval[name],  # same held-out seed pool as the numerator above
+            )
             for g in pruned_graph_variants
             for name, node in seed_nodes.items()
         ]

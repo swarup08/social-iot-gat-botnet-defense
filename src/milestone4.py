@@ -22,6 +22,24 @@ from typing import Dict, List
 
 from scipy import stats
 
+# Supervisor/reviewer-flagged fix ("REQUIRES RERUN: separate policy-training
+# and evaluation rollouts"): PruningEnv's reward signal during RL training
+# uses measure_security's default infection_seed_base=7 (see src/milestone3.py).
+# If a script's FINAL reported containment_ratio also used seed base 7, the
+# policy would be graded on the exact same infection realizations it was
+# trained/rewarded against -- not an independent evaluation. This constant is
+# therefore used for every method's FINAL measurement in every Milestone-4
+# script that measures a per-graph, per-method containment_ratio (originally
+# introduced in demo_milestone4_harness.py, moved here so
+# demo_milestone4_reward_ablation.py and demo_milestone4_stress_tests.py can
+# share it instead of each hand-rolling their own copy), deliberately
+# disjoint from PruningEnv's training-time seed range (7..7+n_rollouts-1 =
+# 7..21 by default), so the reported number reflects infection rollouts the
+# policy never saw or was rewarded against during training. Every method
+# (not just RL) uses the same base, so every method's number comes from the
+# same, clearly-labeled held-out evaluation seed pool.
+EVAL_INFECTION_SEED_BASE = 10007
+
 
 def holm_correction(p_values: List[float]) -> List[float]:
     """Holm-Bonferroni step-down correction.
