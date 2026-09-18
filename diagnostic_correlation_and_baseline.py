@@ -18,6 +18,13 @@ Uses the identical 40 graphs (graph_seed 0..39, n_nodes=300) and the identical
 hub/mid seed-node selection as demo_milestone4_harness.py's run_one_graph, so
 results here are directly comparable to that harness's containment_ratio
 population.
+
+Reviewer-requested (Discussion comment on the correlation numbers): besides
+the aggregate mean+/-std saved to diagnostic_results.csv, also saves
+diagnostic_correlation_per_graph.csv -- one row per (graph_seed, metric,
+correlation_value) for all three Spearman correlations across all 40
+graphs, so the exact per-graph values behind the paper's reported numbers
+are inspectable without rerunning.
 """
 
 import statistics
@@ -57,6 +64,7 @@ def main() -> None:
     corr_degree_betweenness = []
     corr_degree_puv = []
     unpruned_infected_fractions = []
+    per_graph_rows = []  # reviewer-requested: the exact values behind the aggregate mean+/-std
 
     for graph_seed in range(N_GRAPHS):
         # Step 1: build the same graph instance the main harness uses at this seed.
@@ -73,9 +81,16 @@ def main() -> None:
         eigenscore_scores = score_edges_by_eigenscore(graph)
 
         # Step 4: Spearman rank correlation of each score against degree_scores.
-        corr_degree_eigenscore.append(spearman_against_degree(degree_scores, eigenscore_scores))
-        corr_degree_betweenness.append(spearman_against_degree(degree_scores, betweenness_scores))
-        corr_degree_puv.append(spearman_against_degree(degree_scores, p_uv))
+        eigenscore_corr = spearman_against_degree(degree_scores, eigenscore_scores)
+        betweenness_corr = spearman_against_degree(degree_scores, betweenness_scores)
+        puv_corr = spearman_against_degree(degree_scores, p_uv)
+        corr_degree_eigenscore.append(eigenscore_corr)
+        corr_degree_betweenness.append(betweenness_corr)
+        corr_degree_puv.append(puv_corr)
+
+        per_graph_rows.append({"graph_seed": graph_seed, "metric": "degree vs eigenscore", "correlation_value": eigenscore_corr})
+        per_graph_rows.append({"graph_seed": graph_seed, "metric": "degree vs betweenness", "correlation_value": betweenness_corr})
+        per_graph_rows.append({"graph_seed": graph_seed, "metric": "degree vs highest-p_uv", "correlation_value": puv_corr})
 
         # Step 5: unpruned infected fraction per seed node, matching
         # run_one_graph's hub/mid selection and measure()'s "iterate all of
@@ -124,6 +139,12 @@ def main() -> None:
     )
     csv_path = save_table_csv(rows, "diagnostic_results.csv")
     print(f"\nsaved summary table to {csv_path}")
+
+    # --- save CSV: one row per (graph_seed, metric) -- reviewer-requested
+    # per-graph values behind the aggregate mean/std above (correlation-only;
+    # the unpruned-infected-fraction check isn't part of the reviewer's ask). ---
+    per_graph_csv_path = save_table_csv(per_graph_rows, "diagnostic_correlation_per_graph.csv")
+    print(f"saved per-graph correlation table to {per_graph_csv_path} ({len(per_graph_rows)} rows)")
 
 
 if __name__ == "__main__":
