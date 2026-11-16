@@ -1,0 +1,25 @@
+{
+  "main_graphs": 40,
+  "main_methods": 8,
+  "main_selected_rows": 320,
+  "paired_tests": 14,
+  "stress_conditions": 6,
+  "graphs_per_stress_condition": 15,
+  "stress_selected_rows": 540,
+  "matching_repeated_baseline_rows": 240,
+  "correlation_rows": 120,
+  "scope": "Recalculation from released records; original training not rerun",
+  "budget_means": {
+    "GAT threshold": 0.5005611672278338,
+    "GAT top-k": 0.5561167227833894,
+    "betweenness-centrality": 0.5005611672278338,
+    "degree-centrality": 0.5005611672278338,
+    "highest-p_uv": 0.5005611672278338,
+    "random": 0.5005611672278338
+  },
+  "correlation_means": {
+    "degree vs betweenness": 0.7999564829935875,
+    "degree vs eigenscore": 0.8985959879926687,
+    "degree vs highest-p_uv": 0.4252726157022074
+  }
+}
