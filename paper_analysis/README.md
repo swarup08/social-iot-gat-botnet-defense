@@ -9,7 +9,8 @@ released per-graph CSV records. They do not rerun simulation, GAT training or DQ
   and `main_checked.csv`, `paired_checked.csv`, `stress_checked.csv`.
 - `verify_release.py` checks cohort completeness, paired statistics, input hashes
   (`INPUT_SHA256.json`), achieved-budget records and correlation summaries.
-- `build_protocol.py` draws the protocol schematic (no experimental outcomes).
+- `build_protocol.py` draws the protocol schematic (no experimental outcomes). Figures are drawn at their printed width with text of at least 9 pt.
+- Table 1's achieved-removal column uses the budget records (`data/reward_ablation_per_graph.csv`) for six rules; eigenscore and greedy search remove round(0.5 x 891) = 446 edges by construction (`prune_highest_score`; 446 greedy steps without early stop), i.e. 50.1%.
 - `data/` holds the four input CSVs (same content as the CSVs in the repository root; line endings may differ).
 
 Run from this folder: `python build_results.py && python verify_release.py`
